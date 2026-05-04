@@ -5,13 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "LuckPermsAPI"
 version = "1.0.0"
-authors = [{ name = "Fish-LP", email = "Fish.zh@outlook.com" }]
+description = "Python implementation of LuckPerms permission system with Web Editor support"
+readme = "Readme.md"
 license = { text = "MIT" }
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
-]
 requires-python = ">=3.10"
+authors = [{ name = "Fish-LP", email = "Fish.zh@outlook.com" }]
+keywords = ["luckperms", "permissions", "minecraft", "web-editor", "acl"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration :: Authentication/Directory",
+]
 
 dependencies = ["pyyaml", "aiohttp"]
 
@@ -22,12 +34,17 @@ cli = ["rich>=13.0", "prompt_toolkit>=3.0"]
 [project.scripts]
 lp = "luckperms.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/Fish-LP/LuckPerms-Python"
+Repository = "https://github.com/Fish-LP/LuckPerms-Python"
+Issues = "https://github.com/Fish-LP/LuckPerms-Python/issues"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["luckperms*", "plugkit*"]
+include = ["luckperms*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
