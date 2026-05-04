@@ -120,19 +120,19 @@ lp check alice plugin.chat
 
 ### CLI 命令速查
 
-| 命令 | 说明 |
-|------|------|
-| `user <id> info` | 查看用户详情 |
-| `user <id> permission set <node> [T/F] [ctx...]` | 设置权限 |
-| `user <id> parent add <group>` | 加入组 |
-| `user <id> promote <track>` | 沿轨道晋升 |
-| `group <name> info` | 查看组详情 |
-| `group <name> setweight <n>` | 设置权重 |
-| `track <name> info` | 查看轨道 |
-| `check <user> <node> [ctx...]` | 快捷权限检查 |
-| `tree <user\|group> [--depth N]` | 继承树可视化 |
-| `editor` | 启动 Web Editor |
-| `sync` | 重新加载数据 |
+| 命令                                             | 说明            |
+| ------------------------------------------------ | --------------- |
+| `user <id> info`                                 | 查看用户详情    |
+| `user <id> permission set <node> [T/F] [ctx...]` | 设置权限        |
+| `user <id> parent add <group>`                   | 加入组          |
+| `user <id> promote <track>`                      | 沿轨道晋升      |
+| `group <name> info`                              | 查看组详情      |
+| `group <name> setweight <n>`                     | 设置权重        |
+| `track <name> info`                              | 查看轨道        |
+| `check <user> <node> [ctx...]`                   | 快捷权限检查    |
+| `tree <user|group> [--depth N]`                  | 继承树可视化    |
+| `editor`                                         | 启动 Web Editor |
+| `sync`                                           | 重新加载数据    |
 
 ## Web Editor 集成
 
@@ -211,7 +211,7 @@ pre-commit run --all-files
 - ✅ Web Editor 增量/全量变更协议
 - ✅ 过期节点自动清理
 
-详见 [`兼容性对齐指导文档.md`](兼容性对齐指导文档.md)。
+详见 [`对齐状态确认书.md`](对齐状态确认书.md)。
 
 ## 许可证
 
