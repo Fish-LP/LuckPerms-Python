@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 LuckPermsAPI 统一管理层。
 
@@ -7,6 +6,7 @@ LuckPermsAPI 统一管理层。
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from pathlib import Path
@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 from .models import Group, Node, Track, User
 from .query import PermissionQuery
 from .storage import LuckPermsStorage, StorageBackend, YAMLBackend
+
+log = logging.getLogger("luckperms.manager")
 
 
 class LuckPermsManager:
@@ -50,12 +52,14 @@ class LuckPermsManager:
         for name, d in raw_tracks.items():
             self._tracks[name] = Track.from_dict(d)
         self._query = PermissionQuery(self._users, self._groups)
+        log.debug("loaded from disk: users=%d groups=%d tracks=%d", len(self._users), len(self._groups), len(self._tracks))
 
     def _save_all(self) -> None:
         users = {uid: u.to_dict() for uid, u in self._users.items()}
         groups = {name: g.to_dict() for name, g in self._groups.items()}
         tracks = {name: t.to_dict() for name, t in self._tracks.items()}
         self._storage.save_all(users, groups, tracks)
+        log.debug("saved to disk: users=%d groups=%d tracks=%d", len(users), len(groups), len(tracks))
 
     @staticmethod
     def _node_to_webeditor(node: Node) -> dict[str, Any]:
@@ -331,15 +335,7 @@ class LuckPermsManager:
     # Web Editor 序列化（官方格式兼容）
     # ------------------------------------------------------------------
     def to_webeditor_payload(self) -> dict[str, Any]:
-        """生成官方 Web Editor 兼容的 payload。
-
-        官方格式包含：
-        - metadata: commandAlias, uploader, time, pluginVersion, platform
-        - permissionHolders: 合并 users + groups 的数组
-        - tracks: 轨道数组
-        - knownPermissions: 已知权限列表（可选）
-        - potentialContexts: 潜在上下文（可选）
-        """
+        """生成官方 Web Editor 兼容的 payload。"""
         permission_holders: list[dict[str, Any]] = []
 
         for user in self._users.values():
@@ -348,6 +344,7 @@ class LuckPermsManager:
                 "id": user.unique_id,
                 "displayName": user.display_name,
                 "nodes": [self._node_to_webeditor(n) for n in user.nodes],
+                "parents": list(user.parents),
             }
             permission_holders.append(holder)
 
@@ -357,6 +354,7 @@ class LuckPermsManager:
                 "id": group.name,
                 "displayName": group.display_name,
                 "nodes": [self._node_to_webeditor(n) for n in group.nodes],
+                "parents": list(group.parents),
             }
             if group.weight != 0:
                 holder["weight"] = group.weight
@@ -398,50 +396,166 @@ class LuckPermsManager:
         return payload
 
     def apply_webeditor_changes(self, payload: dict[str, Any]) -> None:
-        """应用官方 Web Editor 返回的变更 payload。
+            """应用官方 Web Editor 返回的变更 payload。
 
-        Args:
-            payload: 官方格式的权限数据。
-        """
+            支持两种格式：
+            1. 全量格式: {permissionHolders: [...], tracks: [...]}
+            2. 增量格式: {sessionId, changes: [...], groupDeletions, trackDeletions, userDeletions}
+
+            Args:
+                payload: 官方格式的权限数据。
+            """
+            log.debug("[apply_webeditor_changes] payload keys: %s", list(payload.keys()))
+
+            # 判断是增量格式还是全量格式
+            if "changes" in payload:
+                self._apply_delta_changes(payload)
+            else:
+                self._apply_full_changes(payload)
+
+    def _apply_delta_changes(self, payload: dict[str, Any]) -> None:
+        """应用增量变更（Web Editor Save 后的实际格式）。"""
+        changes = payload.get("changes", [])
+        group_deletions = payload.get("groupDeletions", [])
+        track_deletions = payload.get("trackDeletions", [])
+        user_deletions = payload.get("userDeletions", [])
+
+        log.debug("[apply_delta] changes=%d groupDel=%s trackDel=%s userDel=%s",
+                  len(changes), group_deletions, track_deletions, user_deletions)
+
+        # 1. 处理删除
+        for gid in group_deletions:
+            if gid in self._groups:
+                del self._groups[gid]
+                self._clean_group_refs(gid)
+                log.debug("[apply_delta] deleted group: %s", gid)
+
+        for tid in track_deletions:
+            if tid in self._tracks:
+                del self._tracks[tid]
+                log.debug("[apply_delta] deleted track: %s", tid)
+
+        for uid in user_deletions:
+            if uid in self._users:
+                del self._users[uid]
+                log.debug("[apply_delta] deleted user: %s", uid)
+
+        # 2. 处理变更（新增/更新）
+        for change in changes:
+            ctype = change.get("type")
+            cid = change.get("id")
+            if not ctype or not cid:
+                log.warning("[apply_delta] skip invalid change: %s", change)
+                continue
+
+            # 转换节点 expiry（毫秒 -> 秒）
+            nodes = []
+            for n in change.get("nodes", []):
+                node_dict = dict(n)
+                if "expiry" in node_dict and node_dict["expiry"] is not None:
+                    node_dict["expiry"] = node_dict["expiry"] / 1000.0
+                nodes.append(node_dict)
+
+            if ctype == "group":
+                d = {
+                    "type": "group",
+                    "id": cid,
+                    "displayName": change.get("displayName", cid),
+                    "weight": change.get("weight", 0),
+                    "nodes": nodes,
+                    "parents": change.get("parents", []),
+                }
+                g = Group.from_dict(d)
+                self._groups[g.name] = g
+                log.debug("[apply_delta] upserted group: %s (nodes=%d parents=%s)", g.name, len(g.nodes), g.parents)
+
+            elif ctype == "user":
+                d = {
+                    "type": "user",
+                    "id": cid,
+                    "displayName": change.get("displayName", cid),
+                    "nodes": nodes,
+                    "parents": change.get("parents", []),
+                }
+                u = User.from_dict(d)
+                self._users[u.unique_id] = u
+                log.debug("[apply_delta] upserted user: %s (nodes=%d parents=%s)", u.unique_id, len(u.nodes), u.parents)
+
+            elif ctype == "track":
+                d = {
+                    "name": cid,
+                    "groups": change.get("groups", []),
+                }
+                t = Track.from_dict(d)
+                self._tracks[t.name] = t
+                log.debug("[apply_delta] upserted track: %s (groups=%d)", t.name, len(t.groups))
+
+        self._query = PermissionQuery(self._users, self._groups)
+        self._save_all()
+        log.info("[apply_delta] applied: users=%d groups=%d tracks=%d",
+                 len(self._users), len(self._groups), len(self._tracks))
+
+    def _apply_full_changes(self, payload: dict[str, Any]) -> None:
+        """应用全量变更（旧版 / 直接上传格式）。"""
         # 清空现有数据
         self._users.clear()
         self._groups.clear()
         self._tracks.clear()
 
-        # 先解析所有组（因为用户可能继承组）
         holders = payload.get("permissionHolders", [])
         tracks_raw = payload.get("tracks", [])
+
+        log.debug("[apply_full] holders=%d tracks=%d", len(holders), len(tracks_raw))
 
         # 第一轮：提取组
         for h in holders:
             if h.get("type") == "group":
-                g = Group.from_dict({
+                nodes = []
+                for n in h.get("nodes", []):
+                    node_dict = dict(n)
+                    if "expiry" in node_dict and node_dict["expiry"] is not None:
+                        node_dict["expiry"] = node_dict["expiry"] / 1000.0
+                    nodes.append(node_dict)
+                d = {
+                    "type": "group",
                     "id": h["id"],
                     "displayName": h.get("displayName", h["id"]),
                     "weight": h.get("weight", 0),
-                    "nodes": h.get("nodes", []),
+                    "nodes": nodes,
                     "parents": h.get("parents", []),
-                })
+                }
+                g = Group.from_dict(d)
                 self._groups[g.name] = g
 
         # 第二轮：提取用户
         for h in holders:
             if h.get("type") == "user":
-                u = User.from_dict({
+                nodes = []
+                for n in h.get("nodes", []):
+                    node_dict = dict(n)
+                    if "expiry" in node_dict and node_dict["expiry"] is not None:
+                        node_dict["expiry"] = node_dict["expiry"] / 1000.0
+                    nodes.append(node_dict)
+                d = {
+                    "type": "user",
                     "id": h["id"],
                     "displayName": h.get("displayName", h["id"]),
-                    "nodes": h.get("nodes", []),
+                    "nodes": nodes,
                     "parents": h.get("parents", []),
-                })
+                }
+                u = User.from_dict(d)
                 self._users[u.unique_id] = u
 
         # 解析轨道
         for t in tracks_raw:
-            track = Track.from_dict({
-                "name": t["id"],
+            d = {
+                "name": t.get("id", t.get("name", "")),
                 "groups": t.get("groups", []),
-            })
+            }
+            track = Track.from_dict(d)
             self._tracks[track.name] = track
 
         self._query = PermissionQuery(self._users, self._groups)
         self._save_all()
+        log.info("[apply_full] applied: users=%d groups=%d tracks=%d",
+                 len(self._users), len(self._groups), len(self._tracks))

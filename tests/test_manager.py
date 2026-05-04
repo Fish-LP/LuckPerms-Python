@@ -258,9 +258,10 @@ class TestManager:
         self.mgr.create_track("staff", ["member", "admin"])
 
         payload = self.mgr.to_webeditor_payload()
-        assert payload["metadata"]["plugin"] == "LuckPermsAPI"
-        assert len(payload["users"]) == 1
-        assert len(payload["groups"]) == 1
+        assert payload["metadata"]["pluginVersion"] == "LuckPermsAPI/1.0.0"
+        holders = payload["permissionHolders"]
+        assert len([h for h in holders if h["type"] == "user"]) == 1
+        assert len([h for h in holders if h["type"] == "group"]) == 1
         assert len(payload["tracks"]) == 1
 
         # 重建新管理器并应用
@@ -275,7 +276,8 @@ class TestManager:
         self.mgr.create_user("1")
         self.mgr.user_add_node("1", "temp", True, duration=3600)
         payload = self.mgr.to_webeditor_payload()
-        node_data = payload["users"][0]["nodes"][0]
+        user_holder = [h for h in payload["permissionHolders"] if h["type"] == "user"][0]
+        node_data = user_holder["nodes"][0]
         assert "expiry" in node_data
         assert isinstance(node_data["expiry"], int)
 
@@ -290,9 +292,10 @@ class TestManager:
         """WebEditor 中的 group weight 往返正确。"""
         self.mgr.create_group("admin", weight=100)
         payload = self.mgr.to_webeditor_payload()
-        group_data = payload["groups"][0]
-        assert group_data["weight"] == 100
+        group_holder = [h for h in payload["permissionHolders"] if h["type"] == "group"][0]
+        assert group_holder["weight"] == 100
 
         mgr2 = LuckPermsManager(tempfile.mkdtemp())
         mgr2.apply_webeditor_changes(payload)
         assert mgr2.get_group("admin").weight == 100
+

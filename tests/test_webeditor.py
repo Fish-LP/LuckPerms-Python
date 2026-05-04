@@ -35,14 +35,15 @@ class TestBytebinClient:
 class TestBytesocksClient:
     @pytest.mark.asyncio
     async def test_start_stop(self):
-        client = BytesocksClient("test-channel")
+        client = BytesocksClient()
         # 由于需要真实 WebSocket 服务器，这里仅测试属性
-        assert client.channel == "test-channel"
+        assert client.channel is None
         assert client.is_active is False
 
     def test_ping_pong_handling(self):
         """验证 _handle_message 能正确处理 ping 消息并回复 pong。"""
-        client = BytesocksClient("ch")
+        client = BytesocksClient()
+        client.channel = "test-ch"  # 手动设置用于测试
         # mock _send 来捕获发送的内容
         sent_messages = []
         async def mock_send(data):
@@ -61,7 +62,8 @@ class TestBytesocksClient:
     def test_apply_callback(self):
         """验证收到 apply 消息会触发 on_apply 回调。"""
         callback = MagicMock()
-        client = BytesocksClient("ch", on_apply=callback)
+        client = BytesocksClient(on_apply=callback)
+        client.channel = "test-ch"
         mock_ws = MagicMock()
         mock_ws.closed = False
         client._ws = mock_ws
@@ -76,7 +78,8 @@ class TestBytesocksClient:
 
     def test_invalid_json_ignored(self):
         """验证无效 JSON 不会导致异常。"""
-        client = BytesocksClient("ch")
+        client = BytesocksClient()
+        client.channel = "test-ch"
         mock_ws = MagicMock()
         client._ws = mock_ws
 

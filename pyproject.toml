@@ -17,6 +17,10 @@ dependencies = ["pyyaml", "aiohttp"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov", "pytest-asyncio"]
+cli = ["rich>=13.0", "prompt_toolkit>=3.0"]
+
+[project.scripts]
+lp = "luckperms.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
