@@ -64,7 +64,7 @@ class Formatter:
 
     def __init__(self, debug: bool = False) -> None:
         self.console = Console() if HAS_RICH else None
-        self.debug = debug
+        self._debug = debug
 
     def print(self, text: str = "") -> None:
         if self.console:
@@ -91,7 +91,7 @@ class Formatter:
             print(f"ℹ {text}")
 
     def debug(self, text: str) -> None:
-        if self.debug:
+        if self._debug:
             if self.console:
                 self.console.print(f"[dim]◆ {text}[/dim]")
             else:
@@ -502,8 +502,7 @@ class LPCommand:
             try:
                 url = await session.open()
                 self.fmt.success(f"Web Editor 已启动: {url}")
-                self.fmt.info("在浏览器中编辑并 Save 后，变更会自动回传")
-                self.fmt.info("按 Ctrl+C 可中断此会话")
+                self.fmt.info("在浏览器中编辑并 Save 后，返回此终端执行 applyedits 命令应用更改")
                 while session.is_active:
                     await asyncio.sleep(1)
             except asyncio.CancelledError:

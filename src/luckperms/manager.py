@@ -401,7 +401,7 @@ class LuckPermsManager:
                     "uuid": str(uuid.uuid4()),
                 },
                 "time": int(time.time() * 1000),
-                "pluginVersion": "LuckPermsAPI/1.0.0",
+                "pluginVersion": "5.4.0",
                 "platform": "Python",
             },
             "permissionHolders": permission_holders,

@@ -258,7 +258,7 @@ class TestManager:
         self.mgr.create_track("staff", ["member", "admin"])
 
         payload = self.mgr.to_webeditor_payload()
-        assert payload["metadata"]["pluginVersion"] == "LuckPermsAPI/1.0.0"
+        assert payload["metadata"]["pluginVersion"] == "5.4.0"
         holders = payload["permissionHolders"]
         assert len([h for h in holders if h["type"] == "user"]) == 1
         assert len([h for h in holders if h["type"] == "group"]) == 1

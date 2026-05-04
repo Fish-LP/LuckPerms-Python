@@ -55,7 +55,7 @@ class BytesocksClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/create",
-                headers={"User-Agent": "LuckPermsAPI/1.0.0"},
+                headers={"User-Agent": "5.4.0"},
                 allow_redirects=False,
             ) as resp:
                 if resp.status not in (200, 201, 302, 307, 308):

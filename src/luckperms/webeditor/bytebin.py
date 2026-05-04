@@ -49,7 +49,7 @@ class BytebinClient:
         headers = {
             "Content-Type": "application/json",
             "Content-Encoding": "gzip",
-            "User-Agent": "LuckPermsAPI/1.0.0",
+            "User-Agent": "5.4.0",
         }
 
         async with aiohttp.ClientSession() as session:
@@ -100,7 +100,7 @@ class BytebinClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/{code}",
-                headers={"User-Agent": "LuckPermsAPI/1.0.0"},
+                headers={"User-Agent": "5.4.0"},
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()
