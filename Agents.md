@@ -2,7 +2,7 @@
 
 此文件用于记录和管理本仓库中与 Copilot/VS Code 自定义 Agent 相关的说明、模板与使用规范。
 
-`LuckPermsAPI` 是一个纯 Python 实现的 LuckPerms 风格权限管理系统，支持 Web Editor 可视化编辑。本仓库的 Agent 配置围绕核心模型、查询引擎、存储层和 Web Editor 集成四个维度展开。
+`LuckPermsAPI` 是一个纯 Python 实现的 LuckPerms 风格权限管理系统，支持 Web Editor 可视化编辑。本仓库的 Agent 配置围绕核心模型、查询引擎、存储层、Web Editor 集成和 CLI 命令层五个维度展开。
 
 > 若后续需要新增或调整 Agent，请在本文件中补充条目，并同步创建对应的 `.instructions.md` 或 `.prompt.md` 配置文件。
 
@@ -21,7 +21,7 @@
 - 记录项目内自定义 Agent 的用途、范围与约定。
 - 说明如何在仓库中新增、修改或清理 Agent 配置。
 - 为开发者/维护者提供统一的 Agent 文档入口。
-- 加速 Copilot/VS Code 理解 LuckPermsAPI 的架构分层（模型层、查询层、存储层、Web Editor 层）。
+- 加速 Copilot/VS Code 理解 LuckPermsAPI 的架构分层（模型层、查询层、存储层、Web Editor 层、CLI 层）。
 
 ## 当前 Agent 列表
 
@@ -31,6 +31,7 @@
 | `LuckPermsQuery` | 查询引擎与通配符语义 | `AGENTS.md` | 实现通配符匹配、上下文过滤、继承链解析 |
 | `LuckPermsStorage` | 持久化与存储后端 | `AGENTS.md` | 自定义存储后端、数据迁移、序列化 |
 | `LuckPermsWebEditor` | Web Editor 协议集成 | `AGENTS.md` | 接入 Bytebin/Bytesocks、打开编辑器、应用变更 |
+| `LuckPermsCLI` | 命令行接口设计与实现 | `AGENTS.md` | 编写 lp 风格命令、子命令解析、交互式 Shell |
 
 ## 定义规范
 
@@ -136,10 +137,10 @@
 **关键指令摘要**：
 
 - Web Editor 通信分为两层：
-  1. **Bytebin（HTTP）**：将权限数据 GZIP 压缩后 POST 到 `https://bytebin.lucko.me/post`，获取 `code`。
-  2. **Bytesocks（WebSocket）**：连接 `wss://bytesocks.lucko.me/{channel}`，发送 `putcode` 消息，监听 `apply` 变更请求。
+  1. **Bytebin（HTTP）**：将权限数据 GZIP 压缩后 POST 到 `https://usercontent.luckperms.net/post`，服务端返回 `Location` Header 或 JSON `key`。
+  2. **Bytesocks（WebSocket）**：先 HTTP GET `https://usersockets.luckperms.net/create` 申请 channel key，再连接 `wss://usersockets.luckperms.net/{key}`，发送 `putcode` 消息，监听 `apply` 变更请求。
 - 编辑器 URL 格式：`https://luckperms.net/editor/{code}#{channel}`。
-- `WebEditorSession` 整合流程：`open()` → 上传数据 → 生成 URL → 启动 WebSocket → 等待变更。
+- `WebEditorSession` 整合流程：`open()` → 上传数据 → 申请 channel → 生成 URL → 启动 WebSocket → 等待变更。
 - 收到 `apply` 消息后，调用 `apply_changes(payload)` 重建全部 users/groups/tracks 并持久化。
 - `BytebinClient` 支持自定义端点（自建 bytebin 服务）。
 - `BytesocksClient` 支持 `on_apply` 回调，自动处理 ping/pong 心跳。
@@ -150,9 +151,52 @@
 - `luckperms_api/webeditor/bytebin.py` — `BytebinClient`
 - `luckperms_api/webeditor/websocket.py` — `BytesocksClient`
 
+---
+
+### Agent: LuckPermsCLI
+
+**目标**：指导开发者实现 `lp` 风格的命令行接口，支持子命令解析、交互式 Shell 和脚本化调用。
+
+**触发场景**：
+
+- 需要为 LuckPermsAPI 添加命令行入口（类似 Minecraft 中 `/lp` 命令）。
+- 设计 `lp user`、`lp group`、`lp track`、`lp editor` 等子命令体系。
+- 实现命令补全、权限检查输出格式化、批量操作。
+- 将 CLI 与 `LuckPermsManager` 集成，支持 `--data-dir` 指定存储路径。
+
+**关键指令摘要**：
+
+- CLI 参考 Minecraft LuckPerms 插件的 `/lp` 命令结构，核心子命令：
+  - `lp user <id> info` — 查看用户详情（节点、继承组、上下文）。
+  - `lp user <id> permission set <node> [true/false] [context...]` — 设置/移除权限节点。
+  - `lp user <id> parent add/remove <group>` — 管理用户所属组。
+  - `lp user <id> promote/demote <track>` — 沿轨道晋升/降级。
+  - `lp group <name> info` — 查看组详情。
+  - `lp group <name> permission set <node> ...` — 设置组权限。
+  - `lp group <name> inherit <parent>` — 设置组继承关系。
+  - `lp track <name> info/append/insert/remove` — 轨道管理。
+  - `lp editor` — 一键启动 Web Editor 会话并输出 URL。
+  - `lp check <user> <node> [context...]` — 检查用户是否拥有某权限。
+  - `lp sync` — 强制重新加载磁盘数据。
+  - `lp info` — 显示系统统计信息。
+- **诊断命令**：
+  - `lp verbose <user> [--filter <pattern>]` — 实时拦截并打印该用户的权限检查调用，显示每次检查的节点、上下文、结果、来源（自身节点/继承组/通配符匹配）。通过 `VerbosePermissionQuery` 包装 `PermissionQuery` 实现拦截，支持 `--filter` glob 过滤和 `--output` 日志导出。
+  - `lp tree <user|group> [--depth N]` — 以树形结构递归展示权限继承链，每层显示组名、权重、直接节点数。使用 BFS/DFS 遍历，支持 `--depth` 限制递归深度，避免循环继承导致无限输出。节点后标注 `[self]` 或 `[inherited from <group>]` 帮助溯源。
+- `lp shell` — 进入交互式 REPL，支持 Tab 补全和历史记录。
+- 命令解析使用 `argparse` 或 `click`，支持嵌套子命令。
+- 所有写操作自动调用 `mgr.save_all()` 持久化。
+- 输出使用表格或树形格式化（参考 `rich` 库），支持 `--json` 脚本化输出。
+
+**对应文件/路径**：
+
+- `luckperms/cli.py` — CLI 入口与命令解析（计划中）
+- `luckperms/cli/verbose.py` — `VerbosePermissionQuery` 拦截器（计划中）
+- `luckperms/cli/tree.py` — 继承树生成与渲染（计划中）
+- `luckperms/manager.py` — `LuckPermsManager`（CRUD 数据源）
+
 ## 维护建议
 
 - 当新增或变更自定义 Agent 文件时，务必在本文件中同步更新说明。
 - 本仓库 Agent 统一以 `AGENTS.md` 作为索引页面，各模块详细指令可拆分到对应目录的 `.instructions.md`。
 - 定期检查是否存在过时 Agent 配置并移除无效条目。
-- 新增 Agent 时，优先覆盖 LuckPermsAPI 的核心分层（模型层、查询层、存储层、Web Editor 层），避免过度细分导致维护成本上升。
+- 新增 Agent 时，优先覆盖 LuckPermsAPI 的核心分层（模型层、查询层、存储层、Web Editor 层、CLI 层），避免过度细分导致维护成本上升。

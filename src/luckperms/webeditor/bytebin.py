@@ -2,6 +2,7 @@
 LuckPerms Bytebin API 客户端。
 
 用于上传/下载 Web Editor 的 GZIP 压缩 JSON 数据。
+默认后端已迁移至官方 LuckPerms 托管节点。
 参考：https://github.com/lucko/bytebin
 """
 from __future__ import annotations
@@ -15,13 +16,13 @@ import aiohttp
 
 log = logging.getLogger("luckperms.webeditor")
 
-DEFAULT_BYTEBIN_URL = "https://bytebin.lucko.me"
+DEFAULT_BYTEBIN_URL = "https://usercontent.luckperms.net"
 
 
 class BytebinClient:
     """Bytebin 客户端。
 
-    上传数据到 bytebin 获取 code，或根据 code 下载数据。
+    上传数据到 bytebin 获取 key，或根据 key 下载数据。
 
     Args:
         base_url: Bytebin 端点 URL。
@@ -31,13 +32,13 @@ class BytebinClient:
         self.base_url = base_url.rstrip("/")
 
     async def upload(self, payload: dict[str, Any]) -> str:
-        """上传数据到 bytebin，返回 code。
+        """上传数据到 bytebin，返回 key。
 
         Args:
             payload: 要上传的 JSON 数据。
 
         Return:
-            bytebin 返回的 code。
+            bytebin 返回的 key。
 
         Raises:
             RuntimeError: 上传失败时。
@@ -48,6 +49,7 @@ class BytebinClient:
         headers = {
             "Content-Type": "application/json",
             "Content-Encoding": "gzip",
+            "User-Agent": "LuckPermsAPI/1.0.0",
         }
 
         async with aiohttp.ClientSession() as session:
@@ -61,18 +63,33 @@ class BytebinClient:
                     raise RuntimeError(
                         f"Bytebin 上传失败: HTTP {resp.status} - {text}"
                     )
-                result = await resp.json()
-                code = result.get("code") or result.get("id")
-                if not code:
-                    raise RuntimeError(f"Bytebin 返回无效响应: {result}")
-                log.info("Bytebin 上传成功, code=%s", code)
-                return code
+
+                # 优先从 Location Header 提取 key，兼容 JSON 返回
+                key: str | None = None
+                location = resp.headers.get("Location")
+                if location:
+                    key = location.rstrip("/").split("/")[-1]
+
+                if not key:
+                    result = await resp.json()
+                    key = (
+                        result.get("key")
+                        or result.get("code")
+                        or result.get("id")
+                    )
+
+                if not key:
+                    raise RuntimeError(
+                        f"Bytebin 返回无效响应: {await resp.text()}"
+                    )
+                log.info("Bytebin 上传成功, key=%s", key)
+                return key
 
     async def download(self, code: str) -> dict[str, Any]:
-        """根据 code 从 bytebin 下载数据。
+        """根据 key 从 bytebin 下载数据。
 
         Args:
-            code: bytebin code。
+            code: bytebin key。
 
         Return:
             解压后的 JSON 数据。
@@ -83,7 +100,7 @@ class BytebinClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/{code}",
-                headers={"Accept-Encoding": "gzip"},
+                headers={"User-Agent": "LuckPermsAPI/1.0.0"},
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()

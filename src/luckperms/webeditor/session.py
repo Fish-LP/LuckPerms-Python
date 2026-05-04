@@ -3,15 +3,15 @@ LuckPerms Web Editor 会话管理器。
 
 整合 Bytebin + Bytesocks，提供一键打开编辑器的完整流程：
 1. 将当前权限数据上传到 bytebin
-2. 生成编辑器 URL（https://luckperms.net/editor/）
-3. 通过 bytesocks 监听实时变更
-4. 应用编辑器返回的变更
+2. 向 bytesocks 申请 channel
+3. 生成编辑器 URL（https://luckperms.net/editor/）
+4. 通过 bytesocks 监听实时变更
+5. 应用编辑器返回的变更
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 from typing import Callable, Optional
 
 from .bytebin import BytebinClient
@@ -20,6 +20,7 @@ from .websocket import BytesocksClient
 log = logging.getLogger("luckperms.webeditor")
 
 EDITOR_BASE_URL = "https://luckperms.net/editor"
+DEFAULT_BYTESOCKS_URL = "https://usersockets.luckperms.net"
 
 
 class WebEditorSession:
@@ -66,15 +67,15 @@ class WebEditorSession:
         payload = self.get_payload()
         self._code = await self.bytebin.upload(payload)
 
-        self._channel = secrets.token_urlsafe(16)
-
+        # 向 bytesocks 申请 channel（而非自己生成）
         self._socks = BytesocksClient(
-            channel=self._channel,
-            base_url=self.bytesocks_url or "wss://bytesocks.lucko.me",
+            base_url=self.bytesocks_url or DEFAULT_BYTESOCKS_URL,
             on_apply=self._on_apply,
         )
+        self._channel = await self._socks.create_channel()
         await self._socks.start()
 
+        # 等待 WebSocket 握手完成，再发送 code
         await asyncio.sleep(1.0)
         await self._socks.send_code(self._code)
 

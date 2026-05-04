@@ -1,11 +1,13 @@
 """
 LuckPerms Bytesocks WebSocket 客户端。
 
-用于 Web Editor 实时同步：
-- 监听编辑器发来的变更请求（apply）
-- 推送数据更新
+实现与官方 bytesocks 协议的完整通信：
+1. 先通过 HTTP GET /create 向服务端申请 channel key
+2. 用返回的 key 建立 WebSocket 连接
+3. 监听编辑器发来的变更请求（apply）
+4. 推送数据更新
 
-参考 LuckPerms WebEditorSocket 实现。
+参考 https://github.com/lucko/bytesocks
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ import aiohttp
 
 log = logging.getLogger("luckperms.webeditor")
 
-DEFAULT_BYTESOCKS_URL = "wss://bytesocks.lucko.me"
+DEFAULT_BYTESOCKS_URL = "https://usersockets.luckperms.net"
 
 
 class BytesocksClient:
@@ -27,29 +29,69 @@ class BytesocksClient:
     负责与 LuckPerms Web Editor 的实时通信通道。
 
     Args:
-        channel: 通信频道标识。
-        base_url: Bytesocks WebSocket URL。
+        base_url: Bytesocks HTTP / WebSocket 基础 URL。
         on_apply: 收到变更时的回调函数。
     """
 
     def __init__(
         self,
-        channel: str,
         base_url: str = DEFAULT_BYTESOCKS_URL,
         on_apply: Optional[Callable[[dict], None]] = None,
     ):
-        self.channel = channel
         self.base_url = base_url.rstrip("/")
         self.on_apply = on_apply
+        self.channel: Optional[str] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._session: Optional[aiohttp.ClientSession] = None
         self._task: Optional[asyncio.Task] = None
         self._running = False
 
+    async def create_channel(self) -> str:
+        """向 bytesocks 服务端申请创建 channel，返回 key。
+
+        Raises:
+            RuntimeError: 创建失败。
+        """
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/create",
+                headers={"User-Agent": "LuckPermsAPI/1.0.0"},
+                allow_redirects=False,
+            ) as resp:
+                if resp.status not in (200, 201, 302, 307, 308):
+                    text = await resp.text()
+                    raise RuntimeError(
+                        f"Bytesocks 创建 channel 失败: HTTP {resp.status} - {text}"
+                    )
+
+                # 优先从 Location header 提取
+                key: str | None = None
+                location = resp.headers.get("Location")
+                if location:
+                    key = location.rstrip("/").split("/")[-1]
+
+                if not key:
+                    try:
+                        result = await resp.json()
+                        key = result.get("key")
+                    except Exception:
+                        pass
+
+                if not key:
+                    raise RuntimeError(
+                        f"Bytesocks 返回无效响应: {await resp.text()}"
+                    )
+
+                self.channel = key
+                log.info("Bytesocks channel 已创建: %s", key)
+                return key
+
     async def start(self) -> None:
-        """启动 WebSocket 连接。"""
+        """启动 WebSocket 连接（须先调用 create_channel）。"""
         if self._running:
             return
+        if not self.channel:
+            raise RuntimeError("须先调用 create_channel() 获取 channel key")
         self._running = True
         self._task = asyncio.create_task(self._run())
 
