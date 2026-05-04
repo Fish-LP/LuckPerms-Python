@@ -299,3 +299,84 @@ class TestManager:
         mgr2.apply_webeditor_changes(payload)
         assert mgr2.get_group("admin").weight == 100
 
+    def test_promote_cleans_multiple_track_groups(self):
+        """用户同时属于 track 中多个组时，晋升应清理所有旧组。"""
+        self.mgr.create_group("g1")
+        self.mgr.create_group("g2")
+        self.mgr.create_group("g3")
+        self.mgr.create_track("t", ["g1", "g2", "g3"])
+        self.mgr.create_user("u1")
+
+        # 手动同时加入 g1 和 g2（异常但可能发生）
+        self.mgr.user_add_group("u1", "g1")
+        self.mgr.user_add_group("u1", "g2")
+
+        result = self.mgr.promote("u1", "t")
+        assert result == "g3"
+        assert "g1" not in self.mgr.get_user("u1").parents
+        assert "g2" not in self.mgr.get_user("u1").parents
+        assert "g3" in self.mgr.get_user("u1").parents
+
+    def test_demote_cleans_multiple_track_groups(self):
+        """用户同时属于 track 中多个组时，降级应清理所有旧组。"""
+        self.mgr.create_group("g1")
+        self.mgr.create_group("g2")
+        self.mgr.create_group("g3")
+        self.mgr.create_track("t", ["g1", "g2", "g3"])
+        self.mgr.create_user("u1")
+
+        self.mgr.user_add_group("u1", "g2")
+        self.mgr.user_add_group("u1", "g3")
+
+        result = self.mgr.demote("u1", "t")
+        assert result == "g2"
+        assert "g3" not in self.mgr.get_user("u1").parents
+        assert "g2" in self.mgr.get_user("u1").parents
+
+    def test_demote_from_first_removes_all(self):
+        """从第一级降级时应移除所有 track 组。"""
+        self.mgr.create_group("g1")
+        self.mgr.create_group("g2")
+        self.mgr.create_track("t", ["g1", "g2"])
+        self.mgr.create_user("u1")
+
+        self.mgr.user_add_group("u1", "g1")
+        self.mgr.user_add_group("u1", "g2")
+
+        # 先降级到 g1
+        result = self.mgr.demote("u1", "t")
+        assert result == "g1"
+
+        # 再从 g1 降级，应移除所有
+        result = self.mgr.demote("u1", "t")
+        assert result is None
+        assert "g1" not in self.mgr.get_user("u1").parents
+        assert "g2" not in self.mgr.get_user("u1").parents
+
+    def test_expired_node_cleanup_on_save(self):
+        """保存时应自动清理过期节点。"""
+        self.mgr.create_user("u1")
+        self.mgr.user_add_node("u1", "temp", True, duration=1)
+        assert len(self.mgr.get_user("u1").nodes) == 1
+
+        import time
+        time.sleep(1.1)
+        self.mgr.save_all()
+
+        assert len(self.mgr.get_user("u1").nodes) == 0
+
+    def test_expired_node_filtered_in_webeditor(self):
+        """Web Editor payload 中不应包含过期节点。"""
+        self.mgr.create_user("u1")
+        self.mgr.user_add_node("u1", "active", True)
+        self.mgr.user_add_node("u1", "expired", True, duration=1)
+
+        import time
+        time.sleep(1.1)
+
+        payload = self.mgr.to_webeditor_payload()
+        user_holder = [h for h in payload["permissionHolders"] if h["type"] == "user"][0]
+        keys = [n["key"] for n in user_holder["nodes"]]
+        assert "active" in keys
+        assert "expired" not in keys
+

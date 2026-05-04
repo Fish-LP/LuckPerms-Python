@@ -10,9 +10,11 @@ LuckPermsAPI 权限查询引擎。
 """
 from __future__ import annotations
 
+import heapq
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
+from .config import LuckPermsConfig
 from .models import Group, Node, User
 
 
@@ -24,9 +26,15 @@ class PermissionQuery:
         groups: 组字典 {name: Group}。
     """
 
-    def __init__(self, users: Dict[str, User], groups: Dict[str, Group]):
+    def __init__(
+        self,
+        users: Dict[str, User],
+        groups: Dict[str, Group],
+        config: LuckPermsConfig | None = None,
+    ):
         self._users = users
         self._groups = groups
+        self._config = config or LuckPermsConfig()
 
     def check(
         self,
@@ -48,7 +56,10 @@ class PermissionQuery:
         if user is None:
             return False
 
-        ctx = context or {}
+        # 瞬态上下文覆盖查询上下文
+        ctx = dict(user.transient_contexts)
+        if context:
+            ctx.update(context)
         all_nodes = self._collect_nodes(user, ctx)
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
@@ -63,7 +74,9 @@ class PermissionQuery:
         group = self._groups.get(group_name)
         if group is None:
             return False
-        ctx = context or {}
+        ctx = dict(group.transient_contexts)
+        if context:
+            ctx.update(context)
         all_nodes = self._collect_group_nodes(group, ctx)
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
@@ -73,33 +86,45 @@ class PermissionQuery:
     ) -> List[Tuple[Node, int]]:
         """收集用户及其继承组的所有有效节点，附带优先级权重。
 
-        weight 越小越优先（用户自身=0，直接继承组=1，间接继承=2...）。
+        优先级规则（与原版 LuckPerms 一致）：
+        - 用户自身节点 priority=0（最高优先级）
+        - 继承组节点按组 Weight 从高到低排序
+        - 同 Weight 按继承深度（BFS 层级）排序，层级越近越优先
         """
         nodes: List[Tuple[Node, int]] = []
-        weight = 0
 
-        # 用户自身节点
+        # 用户自身节点（最高优先级）
         for node in user.nodes:
             if not node.is_expired() and node.matches_context(ctx):
-                nodes.append((node, weight))
-        weight += 1
+                nodes.append((node, 0))
 
-        # 继承组节点（BFS）
+        # 继承组节点：按 weight 优先的堆遍历
         visited: Set[str] = set()
-        queue = list(user.parents)
+        queue: List[Tuple[int, int, str]] = []
+        for pname in user.parents:
+            g = self._groups.get(pname)
+            if g:
+                heapq.heappush(queue, (1, -g.weight, pname))
+
         while queue:
-            gname = queue.pop(0)
+            depth, neg_w, gname = heapq.heappop(queue)
             if gname in visited:
                 continue
             visited.add(gname)
             group = self._groups.get(gname)
-            if group is None:
+            if not group:
                 continue
+
+            # depth 越小越优先，同 depth 下 weight 越大越优先
+            priority = depth * 10000 + (10000 - group.weight)
             for node in group.nodes:
                 if not node.is_expired() and node.matches_context(ctx):
-                    nodes.append((node, weight))
-            weight += 1
-            queue.extend(group.parents)
+                    nodes.append((node, priority))
+
+            for parent_name in group.parents:
+                pg = self._groups.get(parent_name)
+                if pg and parent_name not in visited:
+                    heapq.heappush(queue, (depth + 1, -pg.weight, parent_name))
 
         return nodes
 
@@ -108,23 +133,28 @@ class PermissionQuery:
     ) -> List[Tuple[Node, int]]:
         """收集组及其父组的所有有效节点。"""
         nodes: List[Tuple[Node, int]] = []
-        weight = 0
         visited: Set[str] = set()
-        queue = [group.name]
+        queue: List[Tuple[int, int, str]] = []
+        heapq.heappush(queue, (0, -group.weight, group.name))
 
         while queue:
-            gname = queue.pop(0)
+            depth, neg_w, gname = heapq.heappop(queue)
             if gname in visited:
                 continue
             visited.add(gname)
             g = self._groups.get(gname)
             if g is None:
                 continue
+
+            priority = depth * 10000 + (10000 - g.weight)
             for node in g.nodes:
                 if not node.is_expired() and node.matches_context(ctx):
-                    nodes.append((node, weight))
-            weight += 1
-            queue.extend(g.parents)
+                    nodes.append((node, priority))
+
+            for parent_name in g.parents:
+                pg = self._groups.get(parent_name)
+                if pg and parent_name not in visited:
+                    heapq.heappush(queue, (depth + 1, -pg.weight, parent_name))
 
         return nodes
 
@@ -132,26 +162,26 @@ class PermissionQuery:
         """解析权限值。
 
         优先级（从高到低）：
-        1. 精确匹配 (priority=0)
-        2. 单段通配符 * (priority=1)
-        3. 多段通配符 ** (priority=2)
-        4. 同优先级中，weight 越小越优先（继承层级越近越优先）
+        1. 精确匹配 (match_priority=0)
+        2. 单段通配符 * (match_priority=1)
+        3. 多段通配符 ** (match_priority=2)
+        4. 同匹配优先级中，继承优先级越小越优先（用户自身 > 高 weight 组 > 低 weight 组）
         5. 同优先级同 weight，False 优先于 True（显式拒绝优先）
         """
-        candidates: List[Tuple[int, bool, int, Node]] = []
+        candidates: List[Tuple[int, int, int, Node]] = []
 
-        for node, weight in nodes:
-            priority = self._match_priority(node.key, permission)
-            if priority < 0:
+        for node, priority in nodes:
+            match_p = self._match_priority(node.key, permission)
+            if match_p < 0:
                 continue
             false_first = 0 if node.value is False else 1
-            candidates.append((priority, false_first, weight, node))
+            candidates.append((match_p, priority, false_first, node))
 
         if not candidates:
             return None
 
-        # 排序: priority 越小越优先 -> weight 越小越优先(继承层级越近) -> False 优先于 True
-        candidates.sort(key=lambda x: (x[0], x[2], x[1]))
+        # 排序: match_p 越小越优先 -> priority 越小越优先 -> False 优先于 True
+        candidates.sort(key=lambda x: (x[0], x[1], x[2]))
         return candidates[0][3].value
 
     @staticmethod

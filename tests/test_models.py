@@ -271,3 +271,73 @@ class TestTrack:
         d = t.to_dict()
         t2 = Track.from_dict(d)
         assert t2.groups == []
+
+
+class TestMetaNodes:
+    def test_meta_weight_as_node(self):
+        g = Group("admin")
+        g.add_node(Node("weight.100", True))
+        assert g.weight == 100
+
+    def test_meta_prefix_priority(self):
+        g = Group("admin")
+        g.add_node(Node("prefix.50.&c[Mod]", True))
+        g.add_node(Node("prefix.100.&4[Admin]", True))
+        assert g.get_meta("prefix") == "&4[Admin]"
+
+    def test_group_weight_node_sync(self):
+        g = Group("vip")
+        g.weight = 50
+        assert any(n.key == "weight.50" for n in g.nodes)
+        assert g.weight == 50
+
+        g.weight = 100
+        assert not any(n.key == "weight.50" for n in g.nodes)
+        assert any(n.key == "weight.100" for n in g.nodes)
+        assert g.weight == 100
+
+    def test_group_weight_fallback(self):
+        g = Group("mod", weight=10)
+        assert g.weight == 10
+
+    def test_group_to_dict_no_duplicate_weight(self):
+        g = Group("admin")
+        g.weight = 100
+        d = g.to_dict()
+        # 节点中有 weight.100，不应再输出 weight 字段
+        assert "weight" not in d
+        assert any(n["key"] == "weight.100" for n in d["nodes"])
+
+    def test_node_is_meta(self):
+        assert Node("prefix.100.&cAdmin").is_meta is True
+        assert Node("suffix.50.&7Member").is_meta is True
+        assert Node("displayname.Custom").is_meta is True
+        assert Node("weight.100").is_meta is True
+        assert Node("plugin.chat").is_meta is False
+
+    def test_node_meta_type(self):
+        assert Node("prefix.100.&cAdmin").meta_type == "prefix"
+        assert Node("weight.100").meta_type == "weight"
+        assert Node("plugin.chat").meta_type is None
+
+    def test_node_meta_value(self):
+        assert Node("prefix.100.&cAdmin").meta_value == "&cAdmin"
+        assert Node("weight.100").meta_value == "100"
+        assert Node("plugin.chat").meta_value is None
+
+    def test_remove_nodes_by_prefix(self):
+        h = PermissionHolder("1")
+        h.add_node(Node("weight.10", True))
+        h.add_node(Node("weight.20", True))
+        h.add_node(Node("plugin.chat", True))
+        removed = h.remove_nodes_by_prefix("weight.")
+        assert removed == 2
+        assert len(h.nodes) == 1
+        assert h.nodes[0].key == "plugin.chat"
+
+    def test_transient_context(self):
+        u = User("1")
+        u.set_transient_context("world", "nether")
+        assert u.transient_contexts == {"world": "nether"}
+        u.clear_transient_contexts()
+        assert u.transient_contexts == {}

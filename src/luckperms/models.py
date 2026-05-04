@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 @dataclass
@@ -24,6 +24,34 @@ class Node:
     value: bool = True
     context: Dict[str, str] = field(default_factory=dict)
     expiry: Optional[float] = None
+
+    @property
+    def is_meta(self) -> bool:
+        """是否为元数据节点（prefix / suffix / displayname / weight）。"""
+        return self.key.startswith(("prefix.", "suffix.", "displayname.", "weight."))
+
+    @property
+    def meta_type(self) -> Optional[Literal["prefix", "suffix", "displayname", "weight"]]:
+        """返回元数据类型，非元数据节点返回 None。"""
+        for prefix in ("prefix.", "suffix.", "displayname.", "weight."):
+            if self.key.startswith(prefix):
+                return prefix[:-1]  # type: ignore[return-value]
+        return None
+
+    @property
+    def meta_value(self) -> Optional[str]:
+        """提取元数据值。
+
+        例如 ``prefix.100.&cAdmin`` → ``&cAdmin``，``weight.100`` → ``100``。
+        """
+        if not self.is_meta:
+            return None
+        parts = self.key.split(".", 2)
+        if len(parts) >= 3:
+            return parts[2]
+        if len(parts) == 2:
+            return parts[1]
+        return None
 
     def is_expired(self) -> bool:
         """Return: 若已过期返回 True。"""
@@ -79,6 +107,7 @@ class PermissionHolder:
         self.display_name = display_name or identifier
         self._nodes: List[Node] = []
         self._parents: List[str] = []  # 继承的组名
+        self.transient_contexts: Dict[str, str] = {}
 
     @property
     def nodes(self) -> List[Node]:
@@ -119,6 +148,50 @@ class PermissionHolder:
         """移除父组继承。"""
         if group_name in self._parents:
             self._parents.remove(group_name)
+
+    def set_transient_context(self, key: str, value: str) -> None:
+        """设置瞬态上下文（运行时有效，不持久化）。"""
+        self.transient_contexts[key] = value
+
+    def clear_transient_contexts(self) -> None:
+        """清空所有瞬态上下文。"""
+        self.transient_contexts.clear()
+
+    def get_meta(self, meta_type: str) -> Optional[str]:
+        """提取指定类型的最高优先级 meta 值。
+
+        例如 ``get_meta("prefix")`` 返回优先级最高的 prefix 值。
+        """
+        candidates: List[Tuple[int, str]] = []
+        for node in self._nodes:
+            if node.meta_type == meta_type and node.value is True:
+                parts = node.key.split(".")
+                try:
+                    priority = int(parts[1]) if len(parts) > 1 else 0
+                except ValueError:
+                    priority = 0
+                candidates.append((priority, node.meta_value or ""))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda x: x[0])[1]
+
+    def remove_nodes_by_prefix(self, prefix: str) -> int:
+        """移除所有 key 以指定前缀开头的节点。Return: 移除数量。"""
+        removed = 0
+        new_nodes: List[Node] = []
+        for n in self._nodes:
+            if n.key.startswith(prefix):
+                removed += 1
+            else:
+                new_nodes.append(n)
+        self._nodes = new_nodes
+        return removed
+
+    def cleanup_expired_nodes(self) -> int:
+        """清理所有已过期节点。Return: 清理数量。"""
+        before = len(self._nodes)
+        self._nodes = [n for n in self._nodes if not n.is_expired()]
+        return before - len(self._nodes)
 
     @property
     def parents(self) -> List[str]:
@@ -174,13 +247,33 @@ class Group(PermissionHolder):
     def __init__(self, name: str, display_name: str = "", weight: int = 0):
         super().__init__(name, display_name)
         self.name = name
-        self.weight = weight
+        self._weight = weight
+
+    @property
+    def weight(self) -> int:
+        """组权重。优先从 ``weight.X`` 节点解析，否则回退构造时传入的值。"""
+        for node in self._nodes:
+            if node.key.startswith("weight.") and node.value is True:
+                try:
+                    return int(node.key.split(".")[1])
+                except (IndexError, ValueError):
+                    pass
+        return self._weight
+
+    @weight.setter
+    def weight(self, value: int) -> None:
+        self._weight = value
+        # 同步更新/创建 weight 节点，确保 Web Editor 兼容
+        self.remove_nodes_by_prefix("weight.")
+        self.add_node(Node(f"weight.{value}", True))
 
     def to_dict(self) -> dict:
         d = super().to_dict()
         d["type"] = "group"
-        if self.weight:
-            d["weight"] = self.weight
+        # 如果节点中已存在 weight 节点，不再重复输出 weight 字段
+        if not any(n.key.startswith("weight.") for n in self._nodes):
+            if self._weight:
+                d["weight"] = self._weight
         return d
 
     @classmethod

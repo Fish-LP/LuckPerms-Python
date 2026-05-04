@@ -55,6 +55,11 @@ class LuckPermsManager:
         log.debug("loaded from disk: users=%d groups=%d tracks=%d", len(self._users), len(self._groups), len(self._tracks))
 
     def _save_all(self) -> None:
+        # 自动清理所有过期节点
+        for u in self._users.values():
+            u.cleanup_expired_nodes()
+        for g in self._groups.values():
+            g.cleanup_expired_nodes()
         users = {uid: u.to_dict() for uid, u in self._users.items()}
         groups = {name: g.to_dict() for name, g in self._groups.items()}
         tracks = {name: t.to_dict() for name, t in self._tracks.items()}
@@ -283,22 +288,29 @@ class LuckPermsManager:
         if not user or not track:
             return None
 
-        current_idx = -1
-        for i, gname in enumerate(track.groups):
-            if gname in user.parents:
-                current_idx = i
-                break
+        # 找到用户在 track 中的所有组
+        current_indices = [i for i, gname in enumerate(track.groups) if gname in user.parents]
 
-        next_idx = current_idx + 1
-        if next_idx >= len(track.groups):
+        if not current_indices:
+            # 不在轨道上，加入第一级
+            if track.groups:
+                user.add_parent(track.groups[0])
+                self._save_all()
+                return track.groups[0]
             return None
 
-        next_group = track.groups[next_idx]
-        if current_idx >= 0:
-            user.remove_parent(track.groups[current_idx])
-        user.add_parent(next_group)
+        current_max = max(current_indices)
+        next_idx = current_max + 1
+        if next_idx >= len(track.groups):
+            return None  # 已在最高级
+
+        # 清理轨道上所有旧组（原版行为）
+        for idx in current_indices:
+            user.remove_parent(track.groups[idx])
+
+        user.add_parent(track.groups[next_idx])
         self._save_all()
-        return next_group
+        return track.groups[next_idx]
 
     def demote(self, unique_id: str, track_name: str) -> Optional[str]:
         user = self._users.get(unique_id)
@@ -306,21 +318,23 @@ class LuckPermsManager:
         if not user or not track:
             return None
 
-        current_idx = -1
-        for i, gname in enumerate(track.groups):
-            if gname in user.parents:
-                current_idx = i
-                break
-
-        if current_idx <= 0:
-            # 在第一级或不在轨道上，直接移除当前所在组（如果在轨道上）
-            if current_idx == 0:
-                user.remove_parent(track.groups[current_idx])
-                self._save_all()
+        # 找到用户在 track 中的所有组
+        current_indices = [i for i, gname in enumerate(track.groups) if gname in user.parents]
+        if not current_indices:
             return None
 
-        prev_group = track.groups[current_idx - 1]
-        user.remove_parent(track.groups[current_idx])
+        current_max = max(current_indices)
+
+        # 清理轨道上所有旧组
+        for idx in current_indices:
+            user.remove_parent(track.groups[idx])
+
+        if current_max <= 0:
+            # 在第一级或以下，降级后移除所有轨道组（已完成清理）
+            self._save_all()
+            return None
+
+        prev_group = track.groups[current_max - 1]
         user.add_parent(prev_group)
         self._save_all()
         return prev_group
@@ -343,7 +357,7 @@ class LuckPermsManager:
                 "type": "user",
                 "id": user.unique_id,
                 "displayName": user.display_name,
-                "nodes": [self._node_to_webeditor(n) for n in user.nodes],
+                "nodes": [self._node_to_webeditor(n) for n in user.nodes if not n.is_expired()],
                 "parents": list(user.parents),
             }
             permission_holders.append(holder)
@@ -353,10 +367,12 @@ class LuckPermsManager:
                 "type": "group",
                 "id": group.name,
                 "displayName": group.display_name,
-                "nodes": [self._node_to_webeditor(n) for n in group.nodes],
+                "nodes": [self._node_to_webeditor(n) for n in group.nodes if not n.is_expired()],
                 "parents": list(group.parents),
             }
-            if group.weight != 0:
+            # 如果节点中已含 weight 节点，不再重复输出 weight 字段
+            has_weight_node = any(n.key.startswith("weight.") for n in group.nodes)
+            if not has_weight_node and group.weight != 0:
                 holder["weight"] = group.weight
             permission_holders.append(holder)
 

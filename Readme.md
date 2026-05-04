@@ -6,8 +6,11 @@ Python 实现的 [LuckPerms](https://luckperms.net/) 风格权限管理系统，
 
 - **纯 Python 库** — 零框架依赖，可在任何 Python 3.10+ 项目中使用
 - **用户/组/轨道** — 完整的 CRUD，支持上下文绑定、过期时间、继承链
-- **上下文敏感权限** — 支持 `{"group_id": "123456"}` 等上下文约束
+- **上下文敏感权限** — 支持 `{"group_id": "123456"}` 等上下文约束，支持瞬态上下文（运行时动态附加）
 - **通配符系统** — `*` 单段匹配，`**` 多段匹配
+- **原版兼容 Weight 排序** — 继承优先级按组 Weight 从高到低排序，同 Weight 按继承深度排序
+- **元数据节点** — `prefix` / `suffix` / `displayname` / `weight` 作为权限节点，与原版 Web Editor 格式兼容
+- **过期节点自动清理** — 保存时自动清理过期节点，Web Editor 中过滤过期数据
 - **Web Editor 集成** — 一键打开浏览器编辑器，实时同步变更
 - **YAML/JSON 持久化** — 可替换为自定义存储后端
 
@@ -22,7 +25,7 @@ pip install -e ".[dev]"
 ## 快速开始
 
 ```python
-from luckperms_api import LuckPermsManager
+from luckperms import LuckPermsManager
 
 # 初始化管理器（数据自动保存到 ./lp_data/）
 mgr = LuckPermsManager("./lp_data")
@@ -48,7 +51,7 @@ assert mgr.check("123456", "plugin.banned") is False
 
 ```python
 import asyncio
-from luckperms_api import LuckPermsManager, WebEditorSession
+from luckperms import LuckPermsManager, WebEditorSession
 
 mgr = LuckPermsManager("./lp_data")
 
@@ -77,12 +80,14 @@ lp_data/
 ## 架构
 
 ```
-luckperms_api/
+luckperms/
 ├── __init__.py           # 包导出
 ├── models.py             # Node / User / Group / Track / PermissionHolder
-├── query.py              # PermissionQuery（通配符、继承、上下文）
+├── query.py              # PermissionQuery（通配符、继承、上下文、Weight 排序）
 ├── storage.py            # StorageBackend / YAMLBackend / JSONBackend
 ├── manager.py            # LuckPermsManager（CRUD + Web Editor 序列化）
+├── config.py             # LuckPermsConfig（原版配置项兼容）
+├── cli.py                # 交互式 REPL 与命令解析
 └── webeditor/
     ├── bytebin.py        # Bytebin HTTP API
     ├── websocket.py      # Bytesocks WebSocket

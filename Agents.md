@@ -32,6 +32,7 @@
 | `LuckPermsStorage` | 持久化与存储后端 | `AGENTS.md` | 自定义存储后端、数据迁移、序列化 |
 | `LuckPermsWebEditor` | Web Editor 协议集成 | `AGENTS.md` | 接入 Bytebin/Bytesocks、打开编辑器、应用变更 |
 | `LuckPermsCLI` | 命令行接口设计与实现 | `AGENTS.md` | 编写 lp 风格命令、子命令解析、交互式 Shell |
+| `LuckPermsConfig` | 原版配置项兼容 | `AGENTS.md` | 调整权限计算行为开关（预留扩展点） |
 
 ## 定义规范
 
@@ -57,15 +58,17 @@
 **关键指令摘要**：
 
 - `Node` 是原子权限单元，包含 `key`（支持 `*` 单段和 `**` 多段通配）、`value`（True/False）、`context`（键值对上下文）、`expiry`（过期时间戳）。
-- `PermissionHolder` 是 `User` 和 `Group` 的抽象基类，管理 `_nodes` 列表和 `_parents` 继承链。
+- 元数据节点：`prefix.` / `suffix.` / `displayname.` / `weight.` 开头的 key 会被识别为 meta 节点，`Node.is_meta` / `meta_type` / `meta_value` 提供解析支持。
+- `PermissionHolder` 是 `User` 和 `Group` 的抽象基类，管理 `_nodes` 列表和 `_parents` 继承链，支持 `transient_contexts`（瞬态上下文，运行时有效不持久化）。
 - `User` 通过 `unique_id` 标识，`Group` 通过 `name` 标识；两者均支持 `add_node` / `remove_node` / `add_parent` / `remove_parent`。
-- `Track` 实现角色晋升路径（`promote` / `demote`），按 `groups` 列表顺序切换。
-- `LuckPermsManager` 自动加载 `users.{ext}` / `groups.{ext}` / `tracks.{ext}`，任何修改后调用 `save_all()` 持久化。
+- `Group.weight` 为 property，优先从 `weight.X` 元数据节点解析，兼容 Web Editor 格式；setter 自动同步节点。
+- `Track` 实现角色晋升路径（`promote` / `demote`），按 `groups` 列表顺序切换；晋升/降级时会清理用户在 track 中的所有旧组（原版行为）。
+- `LuckPermsManager` 自动加载 `users.{ext}` / `groups.{ext}` / `tracks.{ext}`，任何修改后调用 `save_all()` 持久化；保存时自动清理过期节点，Web Editor payload 中过滤过期节点。
 
 **对应文件/路径**：
 
-- `luckperms_api/models.py` — `Node` / `User` / `Group` / `Track` / `PermissionHolder`
-- `luckperms_api/manager.py` — `LuckPermsManager`
+- `luckperms/models.py` — `Node` / `User` / `Group` / `Track` / `PermissionHolder`
+- `luckperms/manager.py` — `LuckPermsManager`
 
 ---
 
@@ -87,7 +90,7 @@
   1. 收集用户自身节点 + BFS 遍历继承组节点。
   2. 过滤过期节点和上下文不匹配的节点。
   3. 按匹配优先级排序：精确匹配(0) > 单段通配*(1) > 多段通配**(2)。
-  4. 同优先级下，weight 越小越优先（继承层级越近）。
+  4. 同优先级下，按组 Weight 从高到低排序（Weight 越高优先级越高）；同 Weight 时按继承深度（BFS 层级）排序，层级越近越优先。
   5. 同优先级同 weight，False 优先于 True（显式拒绝优先）。
 - `*` 只匹配单段（`plugin.*` 匹配 `plugin.chat`，不匹配 `plugin.a.b`）。
 - `**` 匹配任意多段（`plugin.**` 匹配 `plugin`、`plugin.chat`、`plugin.a.b.c`）。
@@ -95,7 +98,7 @@
 
 **对应文件/路径**：
 
-- `luckperms_api/query.py` — `PermissionQuery`
+- `luckperms/query.py` — `PermissionQuery`
 
 ---
 
@@ -119,7 +122,7 @@
 
 **对应文件/路径**：
 
-- `luckperms_api/storage.py` — `StorageBackend` / `YAMLBackend` / `JSONBackend` / `LuckPermsStorage`
+- `luckperms/storage.py` — `StorageBackend` / `YAMLBackend` / `JSONBackend` / `LuckPermsStorage`
 
 ---
 
@@ -147,9 +150,9 @@
 
 **对应文件/路径**：
 
-- `luckperms_api/webeditor/session.py` — `WebEditorSession`
-- `luckperms_api/webeditor/bytebin.py` — `BytebinClient`
-- `luckperms_api/webeditor/websocket.py` — `BytesocksClient`
+- `luckperms/webeditor/session.py` — `WebEditorSession`
+- `luckperms/webeditor/bytebin.py` — `BytebinClient`
+- `luckperms/webeditor/websocket.py` — `BytesocksClient`
 
 ---
 
@@ -189,9 +192,7 @@
 
 **对应文件/路径**：
 
-- `luckperms/cli.py` — CLI 入口与命令解析（计划中）
-- `luckperms/cli/verbose.py` — `VerbosePermissionQuery` 拦截器（计划中）
-- `luckperms/cli/tree.py` — 继承树生成与渲染（计划中）
+- `luckperms/cli.py` — CLI 入口、命令解析、交互式 REPL、verbose 拦截器与继承树渲染
 - `luckperms/manager.py` — `LuckPermsManager`（CRUD 数据源）
 
 ## 维护建议

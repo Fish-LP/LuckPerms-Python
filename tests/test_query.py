@@ -261,3 +261,63 @@ class TestPermissionQuery:
         u.add_node(Node("*", True))
         self.users["1"] = u
         assert self.q.check("1", "") is False
+
+    def test_weight_priority_over_depth(self):
+        """高 weight 的远亲组应优先于低 weight 的近亲组（原版行为）。"""
+        low = Group("low", weight=1)
+        low.add_node(Node("perm", False))
+        self.groups["low"] = low
+
+        high = Group("high", weight=100)
+        high.add_node(Node("perm", True))
+        self.groups["high"] = high
+
+        mid = Group("mid", weight=50)
+        mid.add_parent("low")   # 近亲，但 low weight
+        mid.add_parent("high")  # 远亲，但 high weight
+        self.groups["mid"] = mid
+
+        u = User("1")
+        u.add_parent("mid")
+        self.users["1"] = u
+
+        # 原版行为: high(weight=100) 优先于 low(weight=1)
+        assert self.q.check("1", "perm") is True
+
+    def test_weight_same_depth_different_groups(self):
+        """同深度下，高 weight 组优先。"""
+        g1 = Group("g1", weight=10)
+        g1.add_node(Node("perm", False))
+        self.groups["g1"] = g1
+
+        g2 = Group("g2", weight=50)
+        g2.add_node(Node("perm", True))
+        self.groups["g2"] = g2
+
+        u = User("1")
+        u.add_parent("g1")
+        u.add_parent("g2")
+        self.users["1"] = u
+
+        # g2(weight=50) 优先于 g1(weight=10)
+        assert self.q.check("1", "perm") is True
+
+    def test_transient_context_overrides(self):
+        """瞬态上下文无需查询参数即可生效。"""
+        u = User("1")
+        u.add_node(Node("plugin.fly", True, {"world": "nether"}))
+        u.set_transient_context("world", "nether")
+        self.users["1"] = u
+        # 即使查询时不传 world 上下文，瞬态上下文也生效
+        assert self.q.check("1", "plugin.fly") is True
+
+    def test_transient_context_overridden_by_query(self):
+        """查询上下文可覆盖瞬态上下文。"""
+        u = User("1")
+        u.add_node(Node("plugin.fly", True, {"world": "nether"}))
+        u.set_transient_context("world", "overworld")
+        self.users["1"] = u
+        # 瞬态上下文为 overworld，不匹配 nether
+        assert self.q.check("1", "plugin.fly") is False
+        # 查询上下文覆盖瞬态上下文
+        assert self.q.check("1", "plugin.fly", {"world": "nether"}) is True
