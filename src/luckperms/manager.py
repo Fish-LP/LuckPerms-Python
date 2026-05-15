@@ -477,8 +477,6 @@ class LuckPermsManager:
             nodes = []
             for n in change.get("nodes", []):
                 node_dict = dict(n)
-                if "expiry" in node_dict and node_dict["expiry"] is not None:
-                    node_dict["expiry"] = node_dict["expiry"] / 1000.0
                 nodes.append(node_dict)
 
             if ctype == "group":
@@ -538,8 +536,6 @@ class LuckPermsManager:
                 nodes = []
                 for n in h.get("nodes", []):
                     node_dict = dict(n)
-                    if "expiry" in node_dict and node_dict["expiry"] is not None:
-                        node_dict["expiry"] = node_dict["expiry"] / 1000.0
                     nodes.append(node_dict)
                 d = {
                     "type": "group",
@@ -558,8 +554,6 @@ class LuckPermsManager:
                 nodes = []
                 for n in h.get("nodes", []):
                     node_dict = dict(n)
-                    if "expiry" in node_dict and node_dict["expiry"] is not None:
-                        node_dict["expiry"] = node_dict["expiry"] / 1000.0
                     nodes.append(node_dict)
                 d = {
                     "type": "user",

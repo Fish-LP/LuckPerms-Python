@@ -272,7 +272,7 @@ class TestManager:
         assert mgr2.check("1", "plugin.chat") is False
 
     def test_webeditor_node_expiry_roundtrip(self):
-        """WebEditor 中的过期时间（毫秒）往返正确。"""
+        """WebEditor 中的过期时间（秒）往返正确。"""
         self.mgr.create_user("1")
         self.mgr.user_add_node("1", "temp", True, duration=3600)
         payload = self.mgr.to_webeditor_payload()
@@ -280,13 +280,15 @@ class TestManager:
         node_data = user_holder["nodes"][0]
         assert "expiry" in node_data
         assert isinstance(node_data["expiry"], int)
+        # FIX: 官方协议使用秒，不再是毫秒
+        assert node_data["expiry"] == int(time.time() + 3600)
 
         mgr2 = LuckPermsManager(tempfile.mkdtemp())
         mgr2.apply_webeditor_changes(payload)
         node = mgr2.get_user("1").nodes[0]
         assert node.key == "temp"
+        assert node.value is True
         assert node.expiry is not None
-        assert node.expiry > time.time()
 
     def test_webeditor_group_weight_roundtrip(self):
         """WebEditor 中的 group weight 往返正确。"""

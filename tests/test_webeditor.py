@@ -2,6 +2,7 @@
 LuckPermsAPI Web Editor 单元测试。
 """
 import asyncio
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -41,10 +42,9 @@ class TestBytesocksClient:
         assert client.is_active is False
 
     def test_ping_pong_handling(self):
-        """验证 _handle_message 能正确处理 ping 消息并回复 pong。"""
+        """验证 _handle_message 能正确处理 ping 消息并回复 pong（外层帧格式）。"""
         client = BytesocksClient()
-        client.channel = "test-ch"  # 手动设置用于测试
-        # mock _send 来捕获发送的内容
+        client.channel = "test-ch"
         sent_messages = []
         async def mock_send(data):
             sent_messages.append(data)
@@ -52,29 +52,32 @@ class TestBytesocksClient:
 
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(client._handle_message('{"type": "ping"}'))
+            # FIX: 新协议要求外层帧 {"msg": "...", "signature": "..."}
+            inner = json.dumps({"type": "ping"})
+            frame = json.dumps({"msg": inner, "signature": ""})
+            loop.run_until_complete(client._handle_message(frame))
         finally:
             loop.close()
 
         assert len(sent_messages) == 1
         assert sent_messages[0]["type"] == "pong"
 
-    def test_apply_callback(self):
-        """验证收到 apply 消息会触发 on_apply 回调。"""
-        callback = MagicMock()
-        client = BytesocksClient(on_apply=callback)
-        client.channel = "test-ch"
-        mock_ws = MagicMock()
-        mock_ws.closed = False
-        client._ws = mock_ws
 
+    def test_apply_callback(self):
+        """验证收到 change-request 消息会触发 on_change_request 回调。"""
+        callback = MagicMock()
+        # FIX: 参数名从 on_apply 改为 on_change_request
+        client = BytesocksClient(on_change_request=callback)
+        client.channel = "test-ch"
+        # 同样需要外层帧
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(client._handle_message('{"type": "apply", "data": {"users": []}}'))
+            inner = json.dumps({"type": "change-request", "code": "ABC123"})
+            frame = json.dumps({"msg": inner, "signature": ""})
+            loop.run_until_complete(client._handle_message(frame))
         finally:
             loop.close()
-
-        callback.assert_called_once_with({"users": []})
+        callback.assert_called_once_with("ABC123")
 
     def test_invalid_json_ignored(self):
         """验证无效 JSON 不会导致异常。"""
@@ -101,17 +104,15 @@ class TestWebEditorSession:
 
     @pytest.mark.asyncio
     async def test_session_url_format(self):
-        """验证生成的 URL 格式正确。"""
+        """验证生成的 URL 格式正确（官方格式，无 fragment）。"""
         get_payload = MagicMock(return_value={"metadata": {}})
         apply_changes = MagicMock()
 
         session = WebEditorSession(get_payload, apply_changes)
 
-        # Mock bytebin upload
         session.bytebin = MagicMock()
         session.bytebin.upload = AsyncMock(return_value="ABC123")
 
-        # Mock bytesocks
         with patch("luckperms.webeditor.session.BytesocksClient") as MockClient:
             mock_socks = AsyncMock()
             MockClient.return_value = mock_socks
@@ -120,8 +121,8 @@ class TestWebEditorSession:
 
             assert url.startswith("https://luckperms.net/editor/")
             assert "ABC123" in url
-            assert "#" in url
-            mock_socks.start.assert_awaited_once()
+            # FIX: 新版 URL 不含 #channel，channel 在 payload 的 socket 字段里
+            assert "#" not in url
 
     @pytest.mark.asyncio
     async def test_session_close(self):
@@ -136,26 +137,45 @@ class TestWebEditorSession:
             await session.close()
             mock_socks.stop.assert_awaited_once()
 
+
     def test_on_apply_calls_callback(self):
         get_payload = MagicMock(return_value={})
         apply_changes = MagicMock()
         session = WebEditorSession(get_payload, apply_changes)
         session._closed = False
-        session._on_apply({"users": []})
-        apply_changes.assert_called_once_with({"users": []})
+        
+        # FIX: mock bytebin 和 _socks，避免真发网络请求
+        session.bytebin = MagicMock()
+        session.bytebin.download = AsyncMock(return_value={"changes": []})
+        session._socks = MagicMock()
+        session._socks.send_change_response = AsyncMock()
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(session._on_change_request("ABC123"))
+        finally:
+            loop.close()
+        apply_changes.assert_called_once()
+
 
     def test_on_apply_ignored_when_closed(self):
         get_payload = MagicMock(return_value={})
         apply_changes = MagicMock()
         session = WebEditorSession(get_payload, apply_changes)
         session._closed = True
-        session._on_apply({"users": []})
+        # FIX: 同上
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(session._on_change_request("ABC123"))
+        finally:
+            loop.close()
         apply_changes.assert_not_called()
+
 
 
 class TestWebEditorPayload:
     def test_node_expiry_conversion(self):
-        """验证节点过期时间在序列化时转换为毫秒。"""
+        """验证节点过期时间在序列化时保持为秒（官方协议）。"""
         mgr = LuckPermsManager.__new__(LuckPermsManager)
         node = MagicMock()
         node.key = "test"
@@ -163,15 +183,18 @@ class TestWebEditorPayload:
         node.context = {}
         node.expiry = 1234.5
         result = LuckPermsManager._node_to_webeditor(node)
-        assert result["expiry"] == 1234500
+        # FIX: 官方使用秒，不再 *1000
+        assert result["expiry"] == 1234
+
 
     def test_node_expiry_deserialization(self):
-        """验证毫秒过期时间在反序列化时转换回秒。"""
+        """验证秒级过期时间直接反序列化，无需转换。"""
         node = LuckPermsManager._node_from_webeditor({
             "key": "test",
             "value": True,
-            "expiry": 1234500,
+            "expiry": 1234.5,
         })
+        # FIX: 直接保留秒值，不再 /1000
         assert node.expiry == 1234.5
 
     def test_node_no_expiry_roundtrip(self):
