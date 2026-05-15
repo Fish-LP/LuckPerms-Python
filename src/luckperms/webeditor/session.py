@@ -11,6 +11,8 @@ LuckPerms Web Editor 会话管理器。
 兼容两种 apply 消息格式：
 - 完整 payload dict（自动应用）
 - bytebin code 字符串（自动下载后应用）
+
+支持 close() 后重复 open() 使用。
 """
 from __future__ import annotations
 
@@ -60,18 +62,23 @@ class WebEditorSession:
         self._socks: Optional[BytesocksClient] = None
         self._code: Optional[str] = None
         self._channel: Optional[str] = None
-        self._closed = False
+        self._closed = True
 
     async def open(self) -> str:
         """打开 Web Editor 会话，返回编辑器 URL。
 
+        支持重复调用：若已有旧会话会先清理，再建立新连接。
+
         Return:
             完整的 Web Editor URL，可直接在浏览器中打开。
         """
+        # 若存在旧连接，先彻底关闭
+        if self._socks is not None:
+            await self.close()
+
         payload = self.get_payload()
         self._code = await self.bytebin.upload(payload)
 
-        # 向 bytesocks 申请 channel（而非自己生成）
         self._socks = BytesocksClient(
             base_url=self.bytesocks_url or DEFAULT_BYTESOCKS_URL,
             on_apply=self._on_apply,
@@ -83,16 +90,20 @@ class WebEditorSession:
         await asyncio.sleep(1.0)
         await self._socks.send_code(self._code)
 
+        self._closed = False
         url = f"{EDITOR_BASE_URL}/{self._code}#{self._channel}"
         log.info("Web Editor 会话已开启: %s", url)
         return url
 
     async def close(self) -> None:
-        """关闭会话。"""
+        """关闭会话并彻底清理资源，支持后续再次 open()。"""
         self._closed = True
+        self._code = None
+        self._channel = None
         if self._socks:
             await self._socks.stop()
             self._socks = None
+        log.info("Web Editor 会话已关闭")
 
     async def apply_edits(self, code: str) -> None:
         """手动应用 edits（兼容原版 /lp applyedits 命令）。
@@ -136,4 +147,4 @@ class WebEditorSession:
 
     @property
     def is_active(self) -> bool:
-        return self._socks is not None and self._socks.is_active
+        return not self._closed and self._socks is not None and self._socks.is_active
