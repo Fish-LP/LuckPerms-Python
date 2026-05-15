@@ -229,9 +229,19 @@ class User(PermissionHolder):
 
     @classmethod
     def from_dict(cls, d: dict) -> User:
-        u = cls(d["id"], d.get("display_name", ""))
+        # 兼容 Web Editor 的驼峰命名
+        display = d.get("display_name") or d.get("displayName", "")
+        u = cls(d["id"], display)
         u._nodes = [Node.from_dict(n) for n in d.get("nodes", [])]
-        u._parents = d.get("parents", [])
+        
+        # FIX: Web Editor 用 group.xxx 节点表示继承，反向同步到 _parents
+        parents = d.get("parents", [])
+        u._parents = list(parents)
+        for node in u._nodes:
+            if node.key.startswith("group.") and node.value and not node.context:
+                gname = node.key[6:]
+                if gname not in u._parents:
+                    u._parents.append(gname)
         return u
 
 
@@ -278,9 +288,18 @@ class Group(PermissionHolder):
 
     @classmethod
     def from_dict(cls, d: dict) -> Group:
-        g = cls(d["id"], d.get("display_name", ""), d.get("weight", 0))
+        display = d.get("display_name") or d.get("displayName", "")
+        g = cls(d["id"], display, d.get("weight", 0))
         g._nodes = [Node.from_dict(n) for n in d.get("nodes", [])]
-        g._parents = d.get("parents", [])
+        
+        # FIX: 同 User，从 nodes 反向同步 parents
+        parents = d.get("parents", [])
+        g._parents = list(parents)
+        for node in g._nodes:
+            if node.key.startswith("group.") and node.value and not node.context:
+                gname = node.key[6:]
+                if gname not in g._parents:
+                    g._parents.append(gname)
         return g
 
 

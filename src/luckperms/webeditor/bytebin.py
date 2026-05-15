@@ -1,9 +1,7 @@
 """
-LuckPerms Bytebin API 客户端。
+LuckPerms Bytebin API 客户端（官方协议兼容版）。
 
-用于上传/下载 Web Editor 的 GZIP 压缩 JSON 数据。
-默认后端已迁移至官方 LuckPerms 托管节点。
-参考：https://github.com/lucko/bytebin
+修复：User-Agent 改为 LuckPerms/5.4.0/editor。
 """
 from __future__ import annotations
 
@@ -49,7 +47,7 @@ class BytebinClient:
         headers = {
             "Content-Type": "application/json",
             "Content-Encoding": "gzip",
-            "User-Agent": "5.4.0",
+            "User-Agent": "LuckPerms/5.4.0/editor",
         }
 
         async with aiohttp.ClientSession() as session:
@@ -64,7 +62,6 @@ class BytebinClient:
                         f"Bytebin 上传失败: HTTP {resp.status} - {text}"
                     )
 
-                # 优先从 Location Header 提取 key，兼容 JSON 返回
                 key: str | None = None
                 location = resp.headers.get("Location")
                 if location:
@@ -100,7 +97,7 @@ class BytebinClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/{code}",
-                headers={"User-Agent": "5.4.0"},
+                headers={"User-Agent": "LuckPerms/5.4.0/editor"},
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()

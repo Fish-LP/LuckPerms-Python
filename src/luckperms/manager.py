@@ -68,28 +68,37 @@ class LuckPermsManager:
 
     @staticmethod
     def _node_to_webeditor(node: Node) -> dict[str, Any]:
-        """将 Node 序列化为 Web Editor 兼容格式（expiry 转毫秒）。"""
+        """将 Node 序列化为 Web Editor 兼容格式（expiry 为秒）。"""
         d: dict[str, Any] = {
+            "type": "permission",          # FIX: 添加 type 字段
             "key": node.key,
             "value": node.value,
         }
         if node.context:
             d["context"] = dict(node.context)
         if node.expiry is not None:
-            d["expiry"] = int(node.expiry * 1000)
+            d["expiry"] = int(node.expiry)  # FIX: 官方使用秒级时间戳，不要 *1000
         return d
 
     @staticmethod
     def _node_from_webeditor(data: dict[str, Any]) -> Node:
-        """从 Web Editor 格式反序列化 Node（expiry 毫秒转秒）。"""
+        """从 Web Editor 格式反序列化 Node（expiry 为秒）。"""
         expiry = data.get("expiry")
-        if expiry is not None:
-            expiry = expiry / 1000.0
+        # FIX: 兼容上下文多值格式（官方允许数组），内部暂取首值
+        raw_ctx = data.get("context", {})
+        context: dict[str, str] = {}
+        if isinstance(raw_ctx, dict):
+            for k, v in raw_ctx.items():
+                if isinstance(v, list):
+                    context[k] = v[0] if v else ""
+                else:
+                    context[k] = str(v)
+
         return Node(
             key=data["key"],
             value=data.get("value", True),
-            context=data.get("context", {}),
-            expiry=expiry,
+            context=context,
+            expiry=expiry,                  # FIX: 官方返回的就是秒，不要 /1000
         )
 
     def _clean_group_refs(self, name: str) -> None:

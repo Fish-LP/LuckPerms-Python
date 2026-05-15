@@ -1,13 +1,11 @@
 """
-LuckPerms Bytesocks WebSocket 客户端。
+LuckPerms Bytesocks WebSocket 客户端（官方协议兼容版）。
 
-实现与官方 bytesocks 协议的完整通信：
-1. 先通过 HTTP GET /create 向服务端申请 channel key
-2. 用返回的 key 建立 WebSocket 连接
-3. 监听编辑器发来的变更请求（apply）
-4. 推送数据更新
-
-参考 https://github.com/lucko/bytesocks
+修复要点：
+1. create_channel 严格检查 HTTP 201
+2. 所有消息使用 {"msg": "...", "signature": "..."} 外层帧
+3. 支持 hello / connected / change-request / ping 消息类型
+4. 自动回复 hello-reply（state=trusted）和 pong
 """
 from __future__ import annotations
 
@@ -24,22 +22,19 @@ DEFAULT_BYTESOCKS_URL = "https://usersockets.luckperms.net"
 
 
 class BytesocksClient:
-    """Bytesocks WebSocket 客户端。
-
-    负责与 LuckPerms Web Editor 的实时通信通道。
-
-    Args:
-        base_url: Bytesocks HTTP / WebSocket 基础 URL。
-        on_apply: 收到变更时的回调函数。
-    """
+    """Bytesocks WebSocket 客户端（官方协议兼容）。"""
 
     def __init__(
         self,
         base_url: str = DEFAULT_BYTESOCKS_URL,
-        on_apply: Optional[Callable[[dict], None]] = None,
+        on_hello: Optional[Callable[[str], None]] = None,
+        on_connected: Optional[Callable[[], None]] = None,
+        on_change_request: Optional[Callable[[str], None]] = None,
     ):
         self.base_url = base_url.rstrip("/")
-        self.on_apply = on_apply
+        self.on_hello = on_hello
+        self.on_connected = on_connected
+        self.on_change_request = on_change_request
         self.channel: Optional[str] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._session: Optional[aiohttp.ClientSession] = None
@@ -55,16 +50,16 @@ class BytesocksClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/create",
-                headers={"User-Agent": "5.4.0"},
+                headers={"User-Agent": "LuckPerms/5.4.0"},
                 allow_redirects=False,
             ) as resp:
-                if resp.status not in (200, 201, 302, 307, 308):
+                # FIX: 官方严格返回 201
+                if resp.status != 201:
                     text = await resp.text()
                     raise RuntimeError(
                         f"Bytesocks 创建 channel 失败: HTTP {resp.status} - {text}"
                     )
 
-                # 优先从 Location header 提取
                 key: str | None = None
                 location = resp.headers.get("Location")
                 if location:
@@ -78,9 +73,7 @@ class BytesocksClient:
                         pass
 
                 if not key:
-                    raise RuntimeError(
-                        f"Bytesocks 返回无效响应: {await resp.text()}"
-                    )
+                    raise RuntimeError(f"Bytesocks 返回无效响应: {await resp.text()}")
 
                 self.channel = key
                 log.info("Bytesocks channel 已创建: %s", key)
@@ -113,7 +106,16 @@ class BytesocksClient:
             self._session = None
 
     async def _run(self) -> None:
-        url = f"{self.base_url}/{self.channel}"
+        """WebSocket 主循环。"""
+        # FIX: 根据 http/https 推导 ws/wss
+        if self.base_url.startswith("https://"):
+            ws_url = "wss://" + self.base_url[8:]
+        elif self.base_url.startswith("http://"):
+            ws_url = "ws://" + self.base_url[7:]
+        else:
+            ws_url = self.base_url
+
+        url = f"{ws_url}/{self.channel}"
         self._session = aiohttp.ClientSession()
 
         try:
@@ -124,10 +126,7 @@ class BytesocksClient:
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         await self._handle_message(msg.data)
-                    elif msg.type in (
-                        aiohttp.WSMsgType.CLOSED,
-                        aiohttp.WSMsgType.ERROR,
-                    ):
+                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
         except asyncio.CancelledError:
             raise
@@ -138,41 +137,73 @@ class BytesocksClient:
             log.info("Bytesocks 已断开")
 
     async def _handle_message(self, data: str) -> None:
+        """解析外层帧 msg + signature，分发消息类型。"""
         try:
-            msg = json.loads(data)
+            frame = json.loads(data)
         except json.JSONDecodeError:
             log.warning("收到无效 JSON: %s", data[:200])
             return
 
+        inner_msg = frame.get("msg", "")
+        # signature = frame.get("signature", "")  # 简化版暂不验签
+        if not inner_msg:
+            log.warning("收到空消息帧")
+            return
+
+        try:
+            msg = json.loads(inner_msg)
+        except json.JSONDecodeError:
+            log.warning("收到无效内层消息: %s", inner_msg[:200])
+            return
+
         msg_type = msg.get("type", "").lower()
-        if msg_type == "ping":
+        log.debug("收到消息: type=%s", msg_type)
+
+        if msg_type == "hello":
+            nonce = msg.get("nonce", "")
+            # FIX: 自动回复 hello-reply 建立信任（简化版）
+            await self._send({"type": "hello-reply", "nonce": nonce, "state": "trusted"})
+            if self.on_hello:
+                try:
+                    await self.on_hello(nonce)
+                except Exception:
+                    log.exception("on_hello 回调异常")
+
+        elif msg_type == "connected":
+            if self.on_connected:
+                try:
+                    await self.on_connected()
+                except Exception:
+                    log.exception("on_connected 回调异常")
+
+        elif msg_type == "change-request":
+            code = msg.get("code", "")
+            if self.on_change_request:
+                try:
+                    await self.on_change_request(code)
+                except Exception:
+                    log.exception("on_change_request 回调异常")
+
+        elif msg_type == "ping":
             await self._send({"type": "pong"})
-        elif msg_type == "apply":
-            log.info("收到 Web Editor 变更请求")
-            if self.on_apply:
-                asyncio.get_running_loop().call_soon(
-                    self.on_apply, msg.get("data", {})
-                )
-        elif msg_type == "putcode":
-            log.debug("编辑器确认 code: %s", msg.get("code"))
+
         else:
             log.debug("收到未知消息类型: %s", msg_type)
 
     async def _send(self, data: dict) -> None:
-        if self._ws and not self._ws.closed:
-            await self._ws.send_str(json.dumps(data))
+        """发送外层帧消息。"""
+        if self._ws is None or self._ws.closed:
+            return
+        inner = json.dumps(data)
+        frame = {"msg": inner, "signature": ""}  # 简化：空签名
+        await self._ws.send_str(json.dumps(frame))
 
-    async def send_code(self, code: str) -> None:
-        """向编辑器发送 bytebin code。
-
-        Args:
-            code: bytebin 上传码。
-        """
-        await self._send({"type": "putcode", "code": code})
-
-    async def send_ping(self) -> None:
-        """发送心跳。"""
-        await self._send({"type": "ping"})
+    async def send_change_response(self, state: str, new_session_code: Optional[str] = None) -> None:
+        """发送 change-response（change-request 的回执）。"""
+        payload: dict = {"type": "change-response", "state": state}
+        if new_session_code:
+            payload["newSessionCode"] = new_session_code
+        await self._send(payload)
 
     @property
     def is_active(self) -> bool:
