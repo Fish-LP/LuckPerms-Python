@@ -222,6 +222,25 @@ class User(PermissionHolder):
         super().__init__(unique_id, display_name)
         self.unique_id = unique_id
 
+    @property
+    def is_default(self) -> bool:
+        """Return: 是否为默认状态用户（无需持久化）。
+        
+        默认状态判定：
+        - 无自定义权限节点
+        - 无瞬态上下文
+        - 显示名称为默认值（等于唯一ID）
+        - 继承组为空或仅包含 default
+        """
+        if self._nodes:
+            return False
+        if self.transient_contexts:
+            return False
+        if self.display_name != self.unique_id:
+            return False
+        parents = set(self._parents)
+        return not parents or parents == {"default"}
+
     def to_dict(self) -> dict:
         d = super().to_dict()
         d["type"] = "user"

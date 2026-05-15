@@ -355,12 +355,23 @@ class TestCLIBase:
 
     def test_sync(self) -> None:
         self.mgr.create_user("a")
+        # 加一个自定义节点，使该用户不再是默认用户，确保会被持久化
+        self.mgr.user_add_node("a", "test.sync", True)
         self.mgr.save_all()
         # 在内存中删除，但磁盘还在
         del self.mgr._users["a"]
         out = self._run("sync")
         assert any("SUCCESS" in o for o in out)
         assert self.mgr.get_user("a") is not None
+
+    def test_sync_drops_default_user(self) -> None:
+        """默认用户被内存删除后，sync 不会从磁盘恢复（因为从未写入磁盘）。"""
+        self.mgr.create_user("a")
+        self.mgr.save_all()
+        assert "a" not in self.mgr._storage.load_users()  # 确认未写入
+        del self.mgr._users["a"]
+        self._run("sync")
+        assert self.mgr.get_user("a") is None
 
     def test_help(self) -> None:
         out = self._run("help")

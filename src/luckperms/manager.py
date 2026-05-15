@@ -60,11 +60,20 @@ class LuckPermsManager:
             u.cleanup_expired_nodes()
         for g in self._groups.values():
             g.cleanup_expired_nodes()
-        users = {uid: u.to_dict() for uid, u in self._users.items()}
+        
+        # 过滤默认用户，不持久化以节省存储空间
+        users = {
+            uid: u.to_dict() 
+            for uid, u in self._users.items() 
+            if not u.is_default
+        }
         groups = {name: g.to_dict() for name, g in self._groups.items()}
         tracks = {name: t.to_dict() for name, t in self._tracks.items()}
         self._storage.save_all(users, groups, tracks)
-        log.debug("saved to disk: users=%d groups=%d tracks=%d", len(users), len(groups), len(tracks))
+        log.debug(
+            "saved to disk: users=%d(default_skipped=%d) groups=%d tracks=%d",
+            len(users), len(self._users) - len(users), len(groups), len(tracks),
+        )
 
     @staticmethod
     def _node_to_webeditor(node: Node) -> dict[str, Any]:
@@ -278,7 +287,14 @@ class LuckPermsManager:
         permission: str,
         context: Optional[Dict[str, str]] = None,
     ) -> bool:
-        return self._query.check(unique_id, permission, context)
+        user = self._users.get(unique_id)
+        if user is None:
+            # 为未持久化的用户创建临时默认用户对象
+            # 使其能继承 default 组权限，同时不占用存储空间
+            user = User(unique_id, unique_id)
+            if "default" in self._groups:
+                user.add_parent("default")
+        return self._query.check_user(user, permission, context)
 
     def check_group(
         self,
@@ -362,6 +378,8 @@ class LuckPermsManager:
         permission_holders: list[dict[str, Any]] = []
 
         for user in self._users.values():
+            if user.is_default:
+                continue
             holder: dict[str, Any] = {
                 "type": "user",
                 "id": user.unique_id,

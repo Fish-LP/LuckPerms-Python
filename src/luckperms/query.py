@@ -64,6 +64,24 @@ class PermissionQuery:
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
 
+    def check_user(self, user: User, permission: str, context: Optional[Dict[str, str]] = None) -> bool:
+        """检查指定用户对象是否拥有指定权限（不依赖 _users 缓存）。
+        
+        Args:
+            user: 用户对象。
+            permission: 权限字符串。
+            context: 查询上下文。
+            
+        Return:
+            若显式允许返回 True，显式拒绝或无任何匹配返回 False。
+        """
+        ctx = dict(user.transient_contexts)
+        if context:
+            ctx.update(context)
+        all_nodes = self._collect_nodes(user, ctx)
+        result = self._resolve(permission, all_nodes)
+        return result if result is not None else False
+
     def check_group(
         self,
         group_name: str,
