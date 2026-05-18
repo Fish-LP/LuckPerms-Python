@@ -79,10 +79,27 @@ class Node:
 
     @classmethod
     def from_dict(cls, d: dict) -> Node:
+        """从字典反序列化节点。
+
+        Args:
+            d: 节点字典。
+
+        Return:
+            Node 实例。
+        """
+        raw_ctx = d.get("context", {})
+        context: dict[str, str] = {}
+        if isinstance(raw_ctx, dict):
+            for k, v in raw_ctx.items():
+                if isinstance(v, list):
+                    context[k] = v[0] if v else ""
+                else:
+                    context[k] = str(v)
+
         return cls(
             key=d["key"],
             value=d.get("value", True),
-            context=d.get("context", {}),
+            context=context,
             expiry=d.get("expiry"),
         )
 

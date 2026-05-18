@@ -457,7 +457,11 @@ class LuckPermsManager:
                 self._apply_full_changes(payload)
 
     def _apply_delta_changes(self, payload: dict[str, Any]) -> None:
-        """应用增量变更（Web Editor Save 后的实际格式）。"""
+        """应用增量变更（Web Editor Save 后的实际格式）。
+
+        Args:
+            payload: 官方 Web Editor 返回的增量数据。
+        """
         changes = payload.get("changes", [])
         group_deletions = payload.get("groupDeletions", [])
         track_deletions = payload.get("trackDeletions", [])
@@ -491,11 +495,16 @@ class LuckPermsManager:
                 log.warning("[apply_delta] skip invalid change: %s", change)
                 continue
 
-            # 转换节点 expiry（毫秒 -> 秒）
+            # FIX: 使用 _node_from_webeditor 统一转换 context（兼容 list 值）
             nodes = []
             for n in change.get("nodes", []):
-                node_dict = dict(n)
-                nodes.append(node_dict)
+                node = self._node_from_webeditor(n)
+                nodes.append({
+                    "key": node.key,
+                    "value": node.value,
+                    "context": node.context,
+                    "expiry": node.expiry,
+                })
 
             if ctype == "group":
                 d = {
@@ -537,7 +546,11 @@ class LuckPermsManager:
                  len(self._users), len(self._groups), len(self._tracks))
 
     def _apply_full_changes(self, payload: dict[str, Any]) -> None:
-        """应用全量变更（旧版 / 直接上传格式）。"""
+        """应用全量变更（旧版 / 直接上传格式）。
+
+        Args:
+            payload: 官方格式的全量权限数据。
+        """
         # 清空现有数据
         self._users.clear()
         self._groups.clear()
@@ -551,10 +564,16 @@ class LuckPermsManager:
         # 第一轮：提取组
         for h in holders:
             if h.get("type") == "group":
+                # FIX: 统一转换节点，兼容 Web Editor 的 list context
                 nodes = []
                 for n in h.get("nodes", []):
-                    node_dict = dict(n)
-                    nodes.append(node_dict)
+                    node = self._node_from_webeditor(n)
+                    nodes.append({
+                        "key": node.key,
+                        "value": node.value,
+                        "context": node.context,
+                        "expiry": node.expiry,
+                    })
                 d = {
                     "type": "group",
                     "id": h["id"],
@@ -569,10 +588,16 @@ class LuckPermsManager:
         # 第二轮：提取用户
         for h in holders:
             if h.get("type") == "user":
+                # FIX: 统一转换节点，兼容 Web Editor 的 list context
                 nodes = []
                 for n in h.get("nodes", []):
-                    node_dict = dict(n)
-                    nodes.append(node_dict)
+                    node = self._node_from_webeditor(n)
+                    nodes.append({
+                        "key": node.key,
+                        "value": node.value,
+                        "context": node.context,
+                        "expiry": node.expiry,
+                    })
                 d = {
                     "type": "user",
                     "id": h["id"],
