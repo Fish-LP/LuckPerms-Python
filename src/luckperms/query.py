@@ -15,7 +15,7 @@ import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import LuckPermsConfig
-from .models import Group, Node, User
+from .models import Group, Node, PermissionHolder, User
 
 
 class PermissionQuery:
@@ -121,7 +121,7 @@ class PermissionQuery:
         # 继承组节点：按 weight 优先的堆遍历
         visited: Set[str] = set()
         queue: List[Tuple[int, int, str]] = []
-        for pname in user.parents:
+        for pname in user.parents + self._dynamic_parent_groups(user, ctx):
             g = self._groups.get(pname)
             if g:
                 heapq.heappush(queue, (1, -g.weight, pname))
@@ -171,7 +171,7 @@ class PermissionQuery:
                 if not node.is_expired() and node.matches_context(ctx):
                     nodes.append((node, priority))
 
-            for parent_name in g.parents:
+            for parent_name in g.parents + self._dynamic_parent_groups(g, ctx):
                 pg = self._groups.get(parent_name)
                 if pg and parent_name not in visited:
                     heapq.heappush(queue, (depth + 1, -pg.weight, parent_name))
@@ -242,7 +242,16 @@ class PermissionQuery:
             return 2
         return -1
 
-    @staticmethod
+    def _dynamic_parent_groups(
+        self, holder: PermissionHolder, ctx: Dict[str, List[str]]
+    ) -> List[str]:
+        """从上下文敏感的 group.xxx 节点中提取动态父组。"""
+        groups: List[str] = []
+        for node in holder.nodes:
+            if node.key.startswith("group.") and node.value and node.matches_context(ctx):
+                groups.append(node.key[6:])
+        return groups
+
     def _match_wildcard_dp(pattern_parts: list[str], string_parts: list[str]) -> bool:
         """动态规划匹配含 ** 的通配符模式。
 

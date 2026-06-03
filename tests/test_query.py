@@ -118,6 +118,31 @@ class TestPermissionQuery:
         assert self.q.check("1", "plugin.admin", {"server": "s1", "world": "w1", "extra": "x"}) is True
         assert self.q.check("1", "plugin.admin", {"server": "s1"}) is False
 
+    def test_dynamic_group_inheritance_with_context(self):
+        admin = Group("admin")
+        admin.add_node(Node("plugin.chat", True))
+        self.groups["admin"] = admin
+
+        u = User("1")
+        u.add_node(Node("group.admin", True, {"server": "s1"}))
+        self.users["1"] = u
+
+        assert self.q.check("1", "plugin.chat", {"server": "s1"}) is True
+        assert self.q.check("1", "plugin.chat", {"server": "s2"}) is False
+        assert self.q.check("1", "plugin.chat") is False
+
+    def test_group_dynamic_inheritance_with_context(self):
+        admin = Group("admin")
+        admin.add_node(Node("plugin.chat", True))
+        self.groups["admin"] = admin
+
+        mod = Group("mod")
+        mod.add_node(Node("group.admin", True, {"world": "w1"}))
+        self.groups["mod"] = mod
+
+        assert self.q.check_group("mod", "plugin.chat", {"world": "w1"}) is True
+        assert self.q.check_group("mod", "plugin.chat", {"world": "w2"}) is False
+
     def test_multivalue_context_matching(self):
         u = User("1")
         u.add_node(Node("plugin.admin", True, {"group_id": ["123", "456"]}))
