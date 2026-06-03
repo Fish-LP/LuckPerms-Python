@@ -35,10 +35,24 @@ class Node:
             return context
         for k, v in raw_ctx.items():
             if isinstance(v, list):
-                values = [str(item) for item in v if str(item)]
+                values = []
+                for item in v:
+                    if item is None:
+                        continue
+                    if isinstance(item, bool):
+                        values.append("true" if item else "false")
+                    else:
+                        s = str(item)
+                        if s:
+                            values.append(s)
             else:
-                value = "" if v is None else str(v)
-                values = [value] if value else []
+                if v is None:
+                    continue
+                if isinstance(v, bool):
+                    values = ["true" if v else "false"]
+                else:
+                    s = str(v)
+                    values = [s] if s else []
             if values:
                 context[k] = values
         return context

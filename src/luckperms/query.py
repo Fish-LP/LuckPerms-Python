@@ -141,7 +141,7 @@ class PermissionQuery:
                 if not node.is_expired() and node.matches_context(ctx):
                     nodes.append((node, priority))
 
-            for parent_name in group.parents:
+            for parent_name in group.parents + self._dynamic_parent_groups(group, ctx):
                 pg = self._groups.get(parent_name)
                 if pg and parent_name not in visited:
                     heapq.heappush(queue, (depth + 1, -pg.weight, parent_name))
