@@ -287,6 +287,19 @@ class LuckPermsManager:
         permission: str,
         context: Optional[Dict[str, str]] = None,
     ) -> bool:
+        """检查持有者是否拥有指定权限。
+
+        NOTE: 会创建临时用户对象
+
+        Args:
+            holder_id: 用户唯一 ID。
+            permission: 权限字符串。
+            context: 查询上下文，如 ``{"group_id": "123456"}``。
+
+        Return:
+            若显式允许返回 True，显式拒绝或无任何匹配返回 False。
+        """
+        
         user = self._users.get(unique_id)
         if user is None:
             # 为未持久化的用户创建临时默认用户对象

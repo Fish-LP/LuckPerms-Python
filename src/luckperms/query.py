@@ -44,6 +44,8 @@ class PermissionQuery:
     ) -> bool:
         """检查持有者是否拥有指定权限。
 
+        NOTE: 不会创建用户对象，若用户不存在则直接返回 False。
+
         Args:
             holder_id: 用户唯一 ID。
             permission: 权限字符串。
