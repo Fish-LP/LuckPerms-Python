@@ -84,7 +84,7 @@ class LuckPermsManager:
             "value": node.value,
         }
         if node.context:
-            d["context"] = dict(node.context)
+            d["context"] = {k: list(v) for k, v in node.context.items()}
         if node.expiry is not None:
             d["expiry"] = int(node.expiry)  # FIX: 官方使用秒级时间戳，不要 *1000
         return d
@@ -93,18 +93,7 @@ class LuckPermsManager:
     def _node_from_webeditor(data: dict[str, Any]) -> Node:
         """从 Web Editor 格式反序列化 Node（expiry 为秒）。"""
         expiry = data.get("expiry")
-        # FIX: 兼容上下文多值格式（官方允许数组），内部暂取首值
-        raw_ctx = data.get("context", {})
-        context: dict[str, str] = {}
-        if isinstance(raw_ctx, dict):
-            for k, v in raw_ctx.items():
-                if isinstance(v, list):
-                    val = v[0] if v else ""
-                else:
-                    val = str(v)
-                # FIX: 空字符串表示该上下文已被移除，不应作为匹配条件
-                if val:
-                    context[k] = val
+        context = Node.normalize_context(data.get("context", {}))
 
         # FIX: 防止 Web Editor 把 value 传成 "" 或其他非布尔值
         raw_value = data.get("value", True)
@@ -219,7 +208,7 @@ class LuckPermsManager:
         unique_id: str,
         key: str,
         value: bool = True,
-        context: Optional[Dict[str, str]] = None,
+        context: Optional[Dict[str, Any]] = None,
         duration: Optional[int] = None,
     ) -> None:
         user = self._users[unique_id]
@@ -227,7 +216,7 @@ class LuckPermsManager:
         user.add_node(Node(key, value, context or {}, expiry))
         self._save_all()
 
-    def user_remove_node(self, unique_id: str, key: str, context: Optional[Dict[str, str]] = None) -> bool:
+    def user_remove_node(self, unique_id: str, key: str, context: Optional[Dict[str, Any]] = None) -> bool:
         user = self._users[unique_id]
         result = user.remove_node(key, context)
         self._save_all()
@@ -238,13 +227,13 @@ class LuckPermsManager:
         name: str,
         key: str,
         value: bool = True,
-        context: Optional[Dict[str, str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> None:
         group = self._groups[name]
         group.add_node(Node(key, value, context or {}))
         self._save_all()
 
-    def group_remove_node(self, name: str, key: str, context: Optional[Dict[str, str]] = None) -> bool:
+    def group_remove_node(self, name: str, key: str, context: Optional[Dict[str, Any]] = None) -> bool:
         group = self._groups[name]
         result = group.remove_node(key, context)
         self._save_all()
@@ -297,7 +286,7 @@ class LuckPermsManager:
         self,
         unique_id: str,
         permission: str,
-        context: Optional[Dict[str, str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """检查持有者是否拥有指定权限。
 
@@ -325,7 +314,7 @@ class LuckPermsManager:
         self,
         name: str,
         permission: str,
-        context: Optional[Dict[str, str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> bool:
         return self._query.check_group(name, permission, context)
 

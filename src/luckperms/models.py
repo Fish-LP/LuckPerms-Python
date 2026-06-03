@@ -22,8 +22,26 @@ class Node:
     """
     key: str
     value: bool = True
-    context: Dict[str, str] = field(default_factory=dict)
+    context: Dict[str, List[str]] = field(default_factory=dict)
     expiry: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        self.context = self.normalize_context(self.context)
+
+    @staticmethod
+    def normalize_context(raw_ctx: dict[str, Any]) -> dict[str, list[str]]:
+        context: dict[str, list[str]] = {}
+        if not isinstance(raw_ctx, dict):
+            return context
+        for k, v in raw_ctx.items():
+            if isinstance(v, list):
+                values = [str(item) for item in v if str(item)]
+            else:
+                value = "" if v is None else str(v)
+                values = [value] if value else []
+            if values:
+                context[k] = values
+        return context
 
     @property
     def is_meta(self) -> bool:
@@ -59,13 +77,18 @@ class Node:
             return False
         return time.time() > self.expiry
 
-    def matches_context(self, ctx: Dict[str, str]) -> bool:
+    def matches_context(self, ctx: Dict[str, Any]) -> bool:
         """检查节点上下文是否匹配给定上下文。
 
         规则：节点上下文是查询上下文的子集（即节点要求的所有上下文键值对都必须满足）。
+        支持查询上下文值为字符串或字符串列表。
         """
-        for k, v in self.context.items():
-            if ctx.get(k) != v:
+        normalized_ctx = self.normalize_context(ctx)
+        for k, values in self.context.items():
+            query_values = normalized_ctx.get(k, [])
+            if not query_values:
+                return False
+            if not any(v == q for v in values for q in query_values):
                 return False
         return True
 
@@ -88,16 +111,7 @@ class Node:
             Node 实例。
         """
         raw_ctx = d.get("context", {})
-        context: dict[str, str] = {}
-        if isinstance(raw_ctx, dict):
-            for k, v in raw_ctx.items():
-                if isinstance(v, list):
-                    val = v[0] if v else ""
-                else:
-                    val = str(v)
-                # FIX: 空字符串表示该上下文已被移除，不应作为匹配条件
-                if val:
-                    context[k] = val
+        context = cls.normalize_context(raw_ctx)
 
         # FIX: 防止 Web Editor 把 value 传成 "" 或其他非布尔值
         raw_value = d.get("value", True)
@@ -116,7 +130,7 @@ class Node:
         )
 
     def __hash__(self) -> int:
-        return hash((self.key, self.value, tuple(sorted(self.context.items()))))
+        return hash((self.key, self.value, tuple(sorted((k, tuple(v)) for k, v in self.context.items()))))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Node):
@@ -155,9 +169,9 @@ class PermissionHolder:
                 return
         self._nodes.append(node)
 
-    def remove_node(self, key: str, context: Optional[Dict[str, str]] = None) -> bool:
+    def remove_node(self, key: str, context: Optional[Dict[str, Any]] = None) -> bool:
         """移除匹配 key 和 context 的节点。"""
-        ctx = context or {}
+        ctx = Node.normalize_context(context or {})
         for i, node in enumerate(self._nodes):
             if node.key == key and node.context == ctx:
                 self._nodes.pop(i)

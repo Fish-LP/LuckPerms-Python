@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import heapq
 import re
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import LuckPermsConfig
 from .models import Group, Node, User
@@ -40,7 +40,7 @@ class PermissionQuery:
         self,
         holder_id: str,
         permission: str,
-        context: Optional[Dict[str, str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """检查持有者是否拥有指定权限。
 
@@ -59,14 +59,14 @@ class PermissionQuery:
             return False
 
         # 瞬态上下文覆盖查询上下文
-        ctx = dict(user.transient_contexts)
+        ctx: dict[str, list[str]] = {k: [v] for k, v in user.transient_contexts.items()}
         if context:
-            ctx.update(context)
+            ctx.update(Node.normalize_context(context))
         all_nodes = self._collect_nodes(user, ctx)
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
 
-    def check_user(self, user: User, permission: str, context: Optional[Dict[str, str]] = None) -> bool:
+    def check_user(self, user: User, permission: str, context: Optional[Dict[str, Any]] = None) -> bool:
         """检查指定用户对象是否拥有指定权限（不依赖 _users 缓存）。
         
         Args:
@@ -77,9 +77,9 @@ class PermissionQuery:
         Return:
             若显式允许返回 True，显式拒绝或无任何匹配返回 False。
         """
-        ctx = dict(user.transient_contexts)
+        ctx: dict[str, list[str]] = {k: [v] for k, v in user.transient_contexts.items()}
         if context:
-            ctx.update(context)
+            ctx.update(Node.normalize_context(context))
         all_nodes = self._collect_nodes(user, ctx)
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
@@ -88,21 +88,21 @@ class PermissionQuery:
         self,
         group_name: str,
         permission: str,
-        context: Optional[Dict[str, str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """检查组权限。"""
         group = self._groups.get(group_name)
         if group is None:
             return False
-        ctx = dict(group.transient_contexts)
+        ctx: dict[str, list[str]] = {k: [v] for k, v in group.transient_contexts.items()}
         if context:
-            ctx.update(context)
+            ctx.update(Node.normalize_context(context))
         all_nodes = self._collect_group_nodes(group, ctx)
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
 
     def _collect_nodes(
-        self, user: User, ctx: Dict[str, str]
+        self, user: User, ctx: Dict[str, List[str]]
     ) -> List[Tuple[Node, int]]:
         """收集用户及其继承组的所有有效节点，附带优先级权重。
 
@@ -149,7 +149,7 @@ class PermissionQuery:
         return nodes
 
     def _collect_group_nodes(
-        self, group: Group, ctx: Dict[str, str]
+        self, group: Group, ctx: Dict[str, List[str]]
     ) -> List[Tuple[Node, int]]:
         """收集组及其父组的所有有效节点。"""
         nodes: List[Tuple[Node, int]] = []

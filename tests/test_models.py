@@ -24,10 +24,17 @@ class TestNode:
 
     def test_node_with_context(self):
         n = Node("group.mute", False, {"group_id": "123"})
-        assert n.context == {"group_id": "123"}
+        assert n.context == {"group_id": ["123"]}
         assert n.matches_context({"group_id": "123"}) is True
         assert n.matches_context({"group_id": "456"}) is False
         assert n.matches_context({}) is False
+
+    def test_node_with_multivalue_context(self):
+        n = Node("group.mute", False, {"group_id": ["123", "456"]})
+        assert n.context == {"group_id": ["123", "456"]}
+        assert n.matches_context({"group_id": "123"}) is True
+        assert n.matches_context({"group_id": ["789", "456"]}) is True
+        assert n.matches_context({"group_id": "789"}) is False
 
     def test_node_context_subset(self):
         """节点 context 是查询 context 的子集时才匹配。"""
@@ -47,7 +54,7 @@ class TestNode:
     def test_node_serde(self):
         n = Node("a.b", False, {"k": "v"}, 1234567890.0)
         d = n.to_dict()
-        assert d == {"key": "a.b", "value": False, "context": {"k": "v"}, "expiry": 1234567890.0}
+        assert d == {"key": "a.b", "value": False, "context": {"k": ["v"]}, "expiry": 1234567890.0}
         n2 = Node.from_dict(d)
         assert n == n2
 

@@ -118,6 +118,15 @@ class TestPermissionQuery:
         assert self.q.check("1", "plugin.admin", {"server": "s1", "world": "w1", "extra": "x"}) is True
         assert self.q.check("1", "plugin.admin", {"server": "s1"}) is False
 
+    def test_multivalue_context_matching(self):
+        u = User("1")
+        u.add_node(Node("plugin.admin", True, {"group_id": ["123", "456"]}))
+        self.users["1"] = u
+
+        assert self.q.check("1", "plugin.admin", {"group_id": "123"}) is True
+        assert self.q.check("1", "plugin.admin", {"group_id": ["456", "789"]}) is True
+        assert self.q.check("1", "plugin.admin", {"group_id": "789"}) is False
+
     def test_explicit_deny_overrides_wildcard(self):
         u = User("1")
         u.add_node(Node("plugin.**", True))

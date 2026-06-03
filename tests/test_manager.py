@@ -148,6 +148,13 @@ class TestManager:
         assert self.mgr.check("1", "perm", {"server": "s1"}) is True
         assert self.mgr.check("1", "perm") is False
 
+    def test_user_add_node_with_multivalue_context(self):
+        self.mgr.create_user("1")
+        self.mgr.user_add_node("1", "perm", True, {"server": ["s1", "s2"]})
+        assert self.mgr.check("1", "perm", {"server": "s2"}) is True
+        assert self.mgr.check("1", "perm", {"server": ["s3", "s2"]}) is True
+        assert self.mgr.check("1", "perm", {"server": "s3"}) is False
+
     def test_user_add_node_with_duration(self):
         self.mgr.create_user("1")
         self.mgr.user_add_node("1", "temp", True, duration=1)
