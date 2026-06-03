@@ -99,15 +99,27 @@ class LuckPermsManager:
         if isinstance(raw_ctx, dict):
             for k, v in raw_ctx.items():
                 if isinstance(v, list):
-                    context[k] = v[0] if v else ""
+                    val = v[0] if v else ""
                 else:
-                    context[k] = str(v)
+                    val = str(v)
+                # FIX: 空字符串表示该上下文已被移除，不应作为匹配条件
+                if val:
+                    context[k] = val
+
+        # FIX: 防止 Web Editor 把 value 传成 "" 或其他非布尔值
+        raw_value = data.get("value", True)
+        if isinstance(raw_value, bool):
+            value = raw_value
+        elif isinstance(raw_value, str):
+            value = raw_value.lower() in ("true", "t", "1", "yes", "on")
+        else:
+            value = bool(raw_value)
 
         return Node(
             key=data["key"],
-            value=data.get("value", True),
+            value=value,
             context=context,
-            expiry=expiry,                  # FIX: 官方返回的就是秒，不要 /1000
+            expiry=expiry,
         )
 
     def _clean_group_refs(self, name: str) -> None:
