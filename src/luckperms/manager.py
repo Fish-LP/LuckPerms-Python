@@ -428,11 +428,14 @@ class LuckPermsManager:
         # 收集所有已知权限和上下文
         known_perms: set[str] = set()
         potential_ctxs: dict[str, set[str]] = {}
-        for holder in list(self._users.values()) + list(self._groups.values()):
-            for node in holder.nodes:
+        holders = list(self._users.values()) + list(self._groups.values())
+        holder_obj: Group | User
+        for holder_obj in holders:
+            for node in holder_obj.nodes:
                 known_perms.add(node.key)
                 for k, v in node.context.items():
-                    potential_ctxs.setdefault(k, set()).add(v)
+                    for vi in v:
+                        potential_ctxs.setdefault(k, set()).add(vi)
 
         payload: dict[str, Any] = {
             "metadata": {
