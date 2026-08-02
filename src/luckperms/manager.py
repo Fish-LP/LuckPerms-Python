@@ -434,8 +434,11 @@ class LuckPermsManager:
             for node in holder_obj.nodes:
                 known_perms.add(node.key)
                 for k, v in node.context.items():
-                    for vi in v:
-                        potential_ctxs.setdefault(k, set()).add(vi)
+                    s = potential_ctxs.setdefault(k, set())
+                    if isinstance(v, (list, tuple, set)):
+                        s.update(str(x) for x in v)
+                    else:
+                        s.add(str(v))
 
         payload: dict[str, Any] = {
             "metadata": {
