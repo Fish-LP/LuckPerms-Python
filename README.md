@@ -30,7 +30,7 @@ pip install LuckPermsAPI
 ### 带 CLI 支持（富文本界面 + Tab 补全）
 
 ```bash
-pip install "LuckPermsAPI[cli]"
+pip install "luckperms-python[cli]"
 ```
 
 ### 源码安装（开发模式）
