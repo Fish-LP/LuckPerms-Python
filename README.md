@@ -24,7 +24,7 @@ Python 实现的 [LuckPerms](https://luckperms.net/) 风格权限管理系统，
 ### 从 PyPI 安装（推荐）
 
 ```bash
-pip install LuckPermsAPI
+pip install luckperms-python
 ```
 
 ### 带 CLI 支持（富文本界面 + Tab 补全）
