@@ -15,6 +15,7 @@ import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import LuckPermsConfig
+from .constants import GROUP_NODE_PREFIX, NODE_PRIORITY_DEPTH_STEP
 from .models import Group, Node, PermissionHolder, User
 
 
@@ -58,7 +59,7 @@ class PermissionQuery:
         if user is None:
             return False
 
-        # 瞬态上下文覆盖查询上下文
+        # 瞬态上下文作为基准默认值，显式查询上下文覆盖同名键
         ctx: dict[str, list[str]] = {k: [v] for k, v in user.transient_contexts.items()}
         if context:
             ctx.update(Node.normalize_context(context))
@@ -136,7 +137,9 @@ class PermissionQuery:
                 continue
 
             # depth 越小越优先，同 depth 下 weight 越大越优先
-            priority = depth * 10000 + (10000 - group.weight)
+            priority = depth * NODE_PRIORITY_DEPTH_STEP + (
+                NODE_PRIORITY_DEPTH_STEP - group.weight
+            )
             for node in group.nodes:
                 if not node.is_expired() and node.matches_context(ctx):
                     nodes.append((node, priority))
@@ -166,7 +169,9 @@ class PermissionQuery:
             if g is None:
                 continue
 
-            priority = depth * 10000 + (10000 - g.weight)
+            priority = depth * NODE_PRIORITY_DEPTH_STEP + (
+                NODE_PRIORITY_DEPTH_STEP - g.weight
+            )
             for node in g.nodes:
                 if not node.is_expired() and node.matches_context(ctx):
                     nodes.append((node, priority))
@@ -245,11 +250,16 @@ class PermissionQuery:
     def _dynamic_parent_groups(
         self, holder: PermissionHolder, ctx: Dict[str, List[str]]
     ) -> List[str]:
-        """从上下文敏感的 group.xxx 节点中提取动态父组。"""
+        """从上下文敏感的 group.xxx 节点中提取动态父组（忽略已过期节点）。"""
         groups: List[str] = []
         for node in holder.nodes:
-            if node.key.startswith("group.") and node.value and node.matches_context(ctx):
-                groups.append(node.key[6:])
+            if (
+                node.key.startswith(GROUP_NODE_PREFIX)
+                and node.value
+                and not node.is_expired()
+                and node.matches_context(ctx)
+            ):
+                groups.append(node.key[len(GROUP_NODE_PREFIX):])
         return groups
 
     def _match_wildcard_dp(pattern_parts: list[str], string_parts: list[str]) -> bool:

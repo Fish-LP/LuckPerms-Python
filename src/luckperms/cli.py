@@ -30,9 +30,8 @@ import asyncio
 import logging
 import os
 import shlex
-import sys
 import tempfile
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 # 尝试导入可选依赖
 try:
@@ -42,6 +41,10 @@ try:
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
+if TYPE_CHECKING:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.tree import Tree as RichTree
 
 try:
     from prompt_toolkit import PromptSession
@@ -50,6 +53,10 @@ try:
     HAS_PROMPT_TOOLKIT = True
 except ImportError:
     HAS_PROMPT_TOOLKIT = False
+if TYPE_CHECKING:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.document import Document
 
 from .manager import LuckPermsManager
 from .models import Group, Node, Track, User
@@ -178,13 +185,15 @@ class Formatter:
             self.error(f"持有者 '{holder_id}' 不存在")
             return
 
+        # NOTE: 角色名先取出为变量，避免 f-string 内嵌同引号字符串（仅 Python 3.12+ 支持）
+        role = "user" if user else "group"
         if self.console:
-            root_label = f"[bold]{holder_id}[/bold] ({"user" if user else "group"})"
+            root_label = f"[bold]{holder_id}[/bold] ({role})"
             tree = RichTree(root_label)
             self._build_tree_rich(mgr, target, tree, depth, set())
             self.console.print(tree)
         else:
-            self.print(f"{holder_id} ({"user" if user else "group"})")
+            self.print(f"{holder_id} ({role})")
             self._build_tree_plain(mgr, target, 0, depth, set())
 
     def _build_tree_rich(self, mgr: LuckPermsManager, target: Any, tree: Any, depth: int, visited: set[str]) -> None:
@@ -404,7 +413,7 @@ class LPCommand:
                 self.fmt.error(f"未知命令: {cmd}，输入 help 查看帮助")
         except Exception as e:
             self.fmt.error(str(e))
-            if self.fmt.debug:
+            if self.fmt._debug:
                 import traceback
                 for line in traceback.format_exc().split("\n"):
                     if line.strip():
@@ -509,7 +518,7 @@ class LPCommand:
                 pass
             except Exception as e:
                 self.fmt.error(f"启动 Web Editor 失败: {e}")
-                if self.fmt.debug:
+                if self.fmt._debug:
                     import traceback
                     for line in traceback.format_exc().split("\n"):
                         if line.strip():
@@ -564,7 +573,7 @@ class LPCommand:
                 self.fmt.info("提示: 建议重新运行 editor 生成新的编辑器 URL")
             except Exception as e:
                 self.fmt.error(f"应用 edits 失败: {e}")
-                if self.fmt.debug:
+                if self.fmt._debug:
                     import traceback
                     for line in traceback.format_exc().split("\n"):
                         if line.strip():
@@ -574,7 +583,7 @@ class LPCommand:
             asyncio.run(_run())
         except Exception as e:
             self.fmt.error(f"应用 edits 失败: {e}")
-            if self.fmt.debug:
+            if self.fmt._debug:
                 import traceback
                 for line in traceback.format_exc().split("\n"):
                     if line.strip():
@@ -799,9 +808,12 @@ class LPCommand:
                 return
             idx = int(sub_args[0])
             gname = sub_args[1]
-            track.groups.insert(idx, gname)
-            self.mgr.save_all()
-            self.fmt.success(f"已插入 {gname} 到位置 {idx}")
+            # NOTE: 不能直接 track.groups.insert(...)，groups 返回的是副本
+            if track.insert_group(idx, gname):
+                self.mgr.save_all()
+                self.fmt.success(f"已插入 {gname} 到位置 {idx}")
+            else:
+                self.fmt.error(f"插入失败: 无效索引 {idx}")
         elif sub == "remove":
             if not sub_args:
                 self.fmt.error("用法: track <name> remove <group>")
@@ -825,6 +837,7 @@ class LPCommand:
             self.fmt.table_nodes(holder.nodes, "Nodes")
             return
 
+        node_key = ''
         if sub in ("set", "unset", "check"):
             if not sub_args:
                 self.fmt.error(f"用法: permission {sub} <node> ...")
@@ -832,6 +845,7 @@ class LPCommand:
             node_key = sub_args[0]
 
         if sub == "set":
+            assert node_key
             value = True
             duration: Optional[int] = None
             filtered = []

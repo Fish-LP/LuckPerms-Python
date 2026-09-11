@@ -14,13 +14,15 @@ import asyncio
 import logging
 from typing import Callable, Optional
 
+from ..constants import (
+    DEFAULT_BYTESOCKS_URL,
+    EDITOR_BASE_URL,
+    EDITOR_PROTOCOL_VERSION,
+)
 from .bytebin import BytebinClient
 from .websocket import BytesocksClient
 
 log = logging.getLogger("luckperms.webeditor")
-
-EDITOR_BASE_URL = "https://luckperms.net/editor"
-DEFAULT_BYTESOCKS_URL = "https://usersockets.luckperms.net"
 
 
 class WebEditorSession:
@@ -69,7 +71,7 @@ class WebEditorSession:
         # 2. 生成 payload 并注入 socket 信息
         payload = self.get_payload()
         payload["socket"] = {
-            "protocolVersion": 1,
+            "protocolVersion": EDITOR_PROTOCOL_VERSION,
             "channelId": self._channel,
             "publicKey": "",
         }
@@ -124,7 +126,7 @@ class WebEditorSession:
             # 3. 生成跟进会话（重新上传当前数据 + 相同 channel）
             new_payload = self.get_payload()
             new_payload["socket"] = {
-                "protocolVersion": 1,
+                "protocolVersion": EDITOR_PROTOCOL_VERSION,
                 "channelId": self._channel,
                 "publicKey": "",
             }

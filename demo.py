@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -44,6 +45,10 @@ def print_result(desc: str, result: bool) -> None:
 
 
 def main() -> None:
+    # Windows 控制台默认 GBK，重新配置为 UTF-8 以正常输出 emoji
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8")
+
     # 使用临时目录作为数据存储，演示结束后自动清理
     data_dir = Path(tempfile.gettempdir()) / "luckperms_demo"
     if data_dir.exists():
@@ -74,8 +79,7 @@ def main() -> None:
     mgr.group_add_node("admin", "plugin.*", True)      # 通配符：允许所有 plugin 权限
     mgr.group_add_node("admin", "plugin.ban", False)   # 显式拒绝覆盖通配符
 
-    # 构建继承链: mod -> admin 是错误的，应该是 mod 继承 vip, vip 继承 default
-    # 正确的继承链: default <- vip <- mod <- admin
+    # 构建继承链: admin <- mod <- vip <- default
     mgr.group_inherit("vip", "default")
     mgr.group_inherit("mod", "vip")
     mgr.group_inherit("admin", "mod")

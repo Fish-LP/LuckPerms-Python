@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .constants import DEFAULT_GROUP_NAME, PLUGIN_VERSION, WEIGHT_NODE_PREFIX
 from .models import Group, Node, Track, User
 from .query import PermissionQuery
 from .storage import LuckPermsStorage, StorageBackend, YAMLBackend
@@ -44,6 +45,10 @@ class LuckPermsManager:
     # 内部辅助
     # ------------------------------------------------------------------
     def _load_all(self) -> None:
+        # 彻底重载：先清空内存，避免磁盘上已删除的实体在 sync 后残留
+        self._users.clear()
+        self._groups.clear()
+        self._tracks.clear()
         raw_users, raw_groups, raw_tracks = self._storage.load_all()
         for uid, d in raw_users.items():
             self._users[uid] = User.from_dict(d)
@@ -130,8 +135,8 @@ class LuckPermsManager:
         if unique_id in self._users:
             raise ValueError(f"用户 '{unique_id}' 已存在")
         user = User(unique_id, display_name or unique_id)
-        if "default" in self._groups:
-            user.add_parent("default")
+        if DEFAULT_GROUP_NAME in self._groups:
+            user.add_parent(DEFAULT_GROUP_NAME)
         self._users[unique_id] = user
         self._save_all()
         return user
@@ -199,6 +204,9 @@ class LuckPermsManager:
         del self._tracks[name]
         self._save_all()
         return True
+
+    def list_tracks(self) -> List[Track]:
+        return list(self._tracks.values())
 
     # ------------------------------------------------------------------
     # 节点与继承管理
@@ -306,8 +314,8 @@ class LuckPermsManager:
             # 为未持久化的用户创建临时默认用户对象
             # 使其能继承 default 组权限，同时不占用存储空间
             user = User(unique_id, unique_id)
-            if "default" in self._groups:
-                user.add_parent("default")
+            if DEFAULT_GROUP_NAME in self._groups:
+                user.add_parent(DEFAULT_GROUP_NAME)
         return self._query.check_user(user, permission, context)
 
     def check_group(
@@ -412,7 +420,9 @@ class LuckPermsManager:
                 "parents": list(group.parents),
             }
             # 如果节点中已含 weight 节点，不再重复输出 weight 字段
-            has_weight_node = any(n.key.startswith("weight.") for n in group.nodes)
+            has_weight_node = any(
+                n.key.startswith(WEIGHT_NODE_PREFIX) for n in group.nodes
+            )
             if not has_weight_node and group.weight != 0:
                 holder["weight"] = group.weight
             permission_holders.append(holder)
@@ -448,7 +458,7 @@ class LuckPermsManager:
                     "uuid": str(uuid.uuid4()),
                 },
                 "time": int(time.time() * 1000),
-                "pluginVersion": "5.4.0",
+                "pluginVersion": PLUGIN_VERSION,
                 "platform": "Python",
             },
             "permissionHolders": permission_holders,

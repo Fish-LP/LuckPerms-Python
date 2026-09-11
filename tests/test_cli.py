@@ -40,7 +40,7 @@ class CaptureFormatter(Formatter):
         self.outputs.append(f"INFO:{text}")
 
     def debug(self, text: str) -> None:
-        if self.debug:
+        if self._debug:
             self.outputs.append(f"DEBUG:{text}")
 
 
@@ -319,6 +319,27 @@ class TestCLIBase:
         assert any("SUCCESS:删除轨道: t" in o for o in out)
         assert self.mgr.get_track("t") is None
 
+    def test_track_insert(self) -> None:
+        self.mgr.create_group("a")
+        self.mgr.create_group("b")
+        self.mgr.create_track("t", ["a"])
+        out = self._run("track t insert 0 b")
+        assert any("SUCCESS:已插入 b 到位置 0" in o for o in out)
+        assert self.mgr.get_track("t").groups == ["b", "a"]
+        # 持久化验证
+        mgr2 = LuckPermsManager(self.tmpdir)
+        assert mgr2.get_track("t").groups == ["b", "a"]
+
+    def test_track_insert_invalid_index(self) -> None:
+        self.mgr.create_track("t", [])
+        out = self._run("track t insert 5 x")
+        assert any("ERROR:插入失败" in o for o in out)
+
+    def test_track_list(self) -> None:
+        self.mgr.create_track("t", [])
+        out = self._run("track list")
+        assert not any("ERROR" in o for o in out)
+
     # ---------------------------------------------------------------
     # 9. Tree 命令
     # ---------------------------------------------------------------
@@ -373,6 +394,14 @@ class TestCLIBase:
         self._run("sync")
         assert self.mgr.get_user("a") is None
 
+    def test_sync_clears_stale_memory(self) -> None:
+        """sync 应彻底重载，磁盘上不存在的内存对象应被清除。"""
+        self.mgr.create_user("real", "RealUser")
+        self.mgr._users["ghost"] = User("ghost")
+        self._run("sync")
+        assert self.mgr.get_user("ghost") is None
+        assert self.mgr.get_user("real") is not None
+
     def test_help(self) -> None:
         out = self._run("help")
         assert any("user" in o.lower() for o in out)
@@ -407,6 +436,14 @@ class TestCLIBase:
 
     # ---------------------------------------------------------------
     # 13. 异常与边界
+
+    def test_error_output_has_no_traceback_when_debug_off(self) -> None:
+        """debug 关闭时错误不应泄漏 traceback。"""
+        self.mgr.create_group("g")
+        out = self._run("group g setweight abc")
+        assert any("ERROR:" in o for o in out)
+        assert not any("Traceback" in o for o in out)
+        assert not any('File "' in o for o in out)
     # ---------------------------------------------------------------
     def test_unknown_command(self) -> None:
         out = self._run("foobar")

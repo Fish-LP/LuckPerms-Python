@@ -250,11 +250,21 @@ class TestManager:
         mgr.user_add_group("1", "admin")
         mgr.save_all()
 
-        assert os.path.exists(os.path.join(tmpdir, "users.json"))
+        assert os.path.exists(os.path.join(tmpdir, "luckperms.json"))
 
         mgr2 = LuckPermsManager(tmpdir, backend=JSONBackend())
         assert mgr2.get_user("1").display_name == "Bob"
         assert "admin" in mgr2.get_user("1").parents
+
+    def test_reload_clears_stale_memory(self):
+        """_load_all 应彻底重载，清掉磁盘上不存在的内存对象。"""
+        self.mgr.create_user("real", "RealUser")
+        self.mgr._users["ghost"] = User("ghost")
+
+        self.mgr._load_all()
+
+        assert self.mgr.get_user("ghost") is None
+        assert self.mgr.get_user("real") is not None
 
     def test_webeditor_roundtrip(self):
         self.mgr.create_group("admin")

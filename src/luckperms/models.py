@@ -9,6 +9,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from .constants import (
+    DEFAULT_GROUP_NAME,
+    GROUP_NODE_PREFIX,
+    META_PREFIXES,
+    WEIGHT_NODE_PREFIX,
+)
+
 
 @dataclass
 class Node:
@@ -60,12 +67,12 @@ class Node:
     @property
     def is_meta(self) -> bool:
         """是否为元数据节点（prefix / suffix / displayname / weight）。"""
-        return self.key.startswith(("prefix.", "suffix.", "displayname.", "weight."))
+        return self.key.startswith(META_PREFIXES)
 
     @property
     def meta_type(self) -> Optional[Literal["prefix", "suffix", "displayname", "weight"]]:
         """返回元数据类型，非元数据节点返回 None。"""
-        for prefix in ("prefix.", "suffix.", "displayname.", "weight."):
+        for prefix in META_PREFIXES:
             if self.key.startswith(prefix):
                 return prefix[:-1]  # type: ignore[return-value]
         return None
@@ -296,7 +303,7 @@ class User(PermissionHolder):
         if self.display_name != self.unique_id:
             return False
         parents = set(self._parents)
-        return not parents or parents == {"default"}
+        return not parents or parents == {DEFAULT_GROUP_NAME}
 
     def to_dict(self) -> dict:
         d = super().to_dict()
@@ -314,8 +321,8 @@ class User(PermissionHolder):
         parents = d.get("parents", [])
         u._parents = list(parents)
         for node in u._nodes:
-            if node.key.startswith("group.") and node.value and not node.context:
-                gname = node.key[6:]
+            if node.key.startswith(GROUP_NODE_PREFIX) and node.value and not node.context:
+                gname = node.key[len(GROUP_NODE_PREFIX):]
                 if gname not in u._parents:
                     u._parents.append(gname)
         return u
@@ -339,7 +346,7 @@ class Group(PermissionHolder):
     def weight(self) -> int:
         """组权重。优先从 ``weight.X`` 节点解析，否则回退构造时传入的值。"""
         for node in self._nodes:
-            if node.key.startswith("weight.") and node.value is True:
+            if node.key.startswith(WEIGHT_NODE_PREFIX) and node.value is True:
                 try:
                     return int(node.key.split(".")[1])
                 except (IndexError, ValueError):
@@ -350,14 +357,14 @@ class Group(PermissionHolder):
     def weight(self, value: int) -> None:
         self._weight = value
         # 同步更新/创建 weight 节点，确保 Web Editor 兼容
-        self.remove_nodes_by_prefix("weight.")
-        self.add_node(Node(f"weight.{value}", True))
+        self.remove_nodes_by_prefix(WEIGHT_NODE_PREFIX)
+        self.add_node(Node(f"{WEIGHT_NODE_PREFIX}{value}", True))
 
     def to_dict(self) -> dict:
         d = super().to_dict()
         d["type"] = "group"
         # 如果节点中已存在 weight 节点，不再重复输出 weight 字段
-        if not any(n.key.startswith("weight.") for n in self._nodes):
+        if not any(n.key.startswith(WEIGHT_NODE_PREFIX) for n in self._nodes):
             if self._weight:
                 d["weight"] = self._weight
         return d
@@ -372,8 +379,8 @@ class Group(PermissionHolder):
         parents = d.get("parents", [])
         g._parents = list(parents)
         for node in g._nodes:
-            if node.key.startswith("group.") and node.value and not node.context:
-                gname = node.key[6:]
+            if node.key.startswith(GROUP_NODE_PREFIX) and node.value and not node.context:
+                gname = node.key[len(GROUP_NODE_PREFIX):]
                 if gname not in g._parents:
                     g._parents.append(gname)
         return g
@@ -401,6 +408,25 @@ class Track:
     def append_group(self, group_name: str) -> None:
         if group_name not in self._groups:
             self._groups.append(group_name)
+
+    def insert_group(self, index: int, group_name: str) -> bool:
+        """在指定位置插入组。
+
+        若组已存在于轨道中，则将其移动到新位置（与原版行为一致）。
+
+        Args:
+            index: 目标位置（从 0 开始）。
+            group_name: 组名。
+
+        Return:
+            是否成功（索引为负数或超出末尾时失败）。
+        """
+        if index < 0 or index > len(self._groups):
+            return False
+        if group_name in self._groups:
+            self._groups.remove(group_name)
+        self._groups.insert(index, group_name)
+        return True
 
     def remove_group(self, group_name: str) -> bool:
         if group_name in self._groups:

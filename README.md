@@ -1,7 +1,7 @@
 # LuckPermsAPI
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-206%20passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-227%20passed-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Python 实现的 [LuckPerms](https://luckperms.net/) 风格权限管理系统，完整支持 [Web Editor](https://luckperms.net/editor) 可视化编辑，与原版 Java 版 LuckPerms v5.4+ **核心权限解析结果逐条一致**。
@@ -17,7 +17,7 @@ Python 实现的 [LuckPerms](https://luckperms.net/) 风格权限管理系统，
 - **过期节点自动清理** — 保存时自动清理过期节点，Web Editor 中过滤过期数据
 - **Web Editor 集成** — 一键打开浏览器编辑器，实时同步变更
 - **交互式 CLI** — 内置 `lp` 命令行工具，支持 Tab 补全、继承树可视化、权限监听
-- **YAML/JSON 持久化** — 可替换为自定义存储后端
+- **YAML/JSON 单文件持久化** — 原子写入保证数据整体一致，自动迁移旧版三文件布局，可替换为自定义存储后端
 
 ## 安装
 
@@ -155,7 +155,15 @@ async def main():
 asyncio.run(main())
 ```
 
-生成的 URL 格式：`https://luckperms.net/editor/<bytebin-code>#<bytesocks-channel>`
+生成的 URL 格式：`https://luckperms.net/editor/<bytebin-code>`（实时通道通过 payload 的 `socket` 字段传递）
+
+## 数据文件
+
+全部数据保存在数据目录下的单文件 `luckperms.yml`（JSON 后端为 `luckperms.json`），顶层包含 `users` / `groups` / `tracks` 三个键。
+
+- **原子写入** — 临时文件 + `os.replace`，写入中断不会损坏既有数据
+- **旧布局自动迁移** — 检测到旧版 `users.yml` / `groups.yml` / `tracks.yml` 时自动合并为单文件，旧文件保留不删
+- **自定义后端** — 实现 `StorageBackend` 协议即可替换为数据库等存储
 
 ## 项目结构
 
@@ -164,7 +172,7 @@ luckperms/
 ├── __init__.py           # 包导出
 ├── models.py             # Node / User / Group / Track / PermissionHolder
 ├── query.py              # PermissionQuery（通配符、继承、上下文、Weight 排序）
-├── storage.py            # StorageBackend / YAMLBackend / JSONBackend
+├── storage.py            # StorageBackend / YAMLBackend / JSONBackend（单文件原子写 + 旧布局自动迁移）
 ├── manager.py            # LuckPermsManager（CRUD + Web Editor 序列化）
 ├── config.py             # LuckPermsConfig（原版配置项兼容）
 ├── cli.py                # 交互式 REPL 与命令解析
@@ -198,7 +206,7 @@ pre-commit run --all-files
 
 ## 兼容性
 
-与原版 LuckPerms Java 版核心行为对齐，已通过 206 项自动化测试验证：
+与原版 LuckPerms Java 版核心行为对齐，已通过 227 项自动化测试验证：
 
 - ✅ 节点模型与 CRUD
 - ✅ 通配符解析（`*` / `**`）与优先级
@@ -211,7 +219,7 @@ pre-commit run --all-files
 - ✅ Web Editor 增量/全量变更协议
 - ✅ 过期节点自动清理
 
-详见 [`对齐状态确认书.md`](对齐状态确认书.md)。
+详见 [`tests/`](tests/) 目录（`test_luckperms_compat.py` 为原版行为对照测试）。
 
 ## 许可证
 

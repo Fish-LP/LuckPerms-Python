@@ -106,16 +106,57 @@ class TestLuckPermsStorage:
         assert groups == {"g1": {"id": "g1"}}
         assert tracks == {"t1": {"name": "t1"}}
 
-    def test_file_names(self):
+    def test_single_file_layout(self):
+        """默认使用单文件布局，不再生成旧版三文件。"""
         tmpdir = tempfile.mkdtemp()
         storage = LuckPermsStorage(tmpdir)
         storage.save_all({}, {}, {})
-        assert os.path.exists(os.path.join(tmpdir, "users.yml"))
-        assert os.path.exists(os.path.join(tmpdir, "groups.yml"))
-        assert os.path.exists(os.path.join(tmpdir, "tracks.yml"))
+        assert os.path.exists(os.path.join(tmpdir, "luckperms.yml"))
+        assert not os.path.exists(os.path.join(tmpdir, "users.yml"))
+        assert not os.path.exists(os.path.join(tmpdir, "groups.yml"))
+        assert not os.path.exists(os.path.join(tmpdir, "tracks.yml"))
 
     def test_json_extension(self):
         tmpdir = tempfile.mkdtemp()
         storage = LuckPermsStorage(tmpdir, backend=JSONBackend())
         storage.save_users({})
-        assert os.path.exists(os.path.join(tmpdir, "users.json"))
+        assert os.path.exists(os.path.join(tmpdir, "luckperms.json"))
+
+    def test_legacy_layout_auto_migration(self):
+        """旧版三文件布局应自动迁移到单文件，旧文件保留。"""
+        tmpdir = tempfile.mkdtemp()
+        backend = YAMLBackend()
+        backend.save(Path(tmpdir) / "users.yml", {"users": {"u1": {"id": "u1"}}})
+        backend.save(Path(tmpdir) / "groups.yml", {"groups": {"g1": {"id": "g1"}}})
+        backend.save(Path(tmpdir) / "tracks.yml", {"tracks": {"t1": {"name": "t1"}}})
+
+        storage = LuckPermsStorage(tmpdir)
+        users, groups, tracks = storage.load_all()
+        assert users == {"u1": {"id": "u1"}}
+        assert groups == {"g1": {"id": "g1"}}
+        assert tracks == {"t1": {"name": "t1"}}
+        # 已生成单文件；旧文件保留不删
+        assert os.path.exists(os.path.join(tmpdir, "luckperms.yml"))
+        assert os.path.exists(os.path.join(tmpdir, "users.yml"))
+
+    def test_save_leaves_no_tmp_files(self):
+        """原子写不应留下临时文件。"""
+        tmpdir = tempfile.mkdtemp()
+        storage = LuckPermsStorage(tmpdir)
+        storage.save_all({"u1": {"id": "u1"}}, {}, {})
+        leftovers = [f for f in os.listdir(tmpdir) if f.endswith(".tmp")]
+        assert leftovers == []
+
+    def test_invalid_yaml_raises_value_error(self):
+        tmpdir = tempfile.mkdtemp()
+        path = Path(tmpdir) / "bad.yml"
+        path.write_text("users: [unclosed", encoding="utf-8")
+        with pytest.raises(ValueError, match="解析失败"):
+            YAMLBackend().load(path)
+
+    def test_non_dict_top_level_raises(self):
+        tmpdir = tempfile.mkdtemp()
+        path = Path(tmpdir) / "list.yml"
+        path.write_text("- a\n- b\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="格式无效"):
+            YAMLBackend().load(path)

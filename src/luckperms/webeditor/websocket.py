@@ -16,9 +16,9 @@ from typing import Callable, Optional
 
 import aiohttp
 
-log = logging.getLogger("luckperms.webeditor")
+from ..constants import DEFAULT_BYTESOCKS_URL, USER_AGENT
 
-DEFAULT_BYTESOCKS_URL = "https://usersockets.luckperms.net"
+log = logging.getLogger("luckperms.webeditor")
 
 
 class BytesocksClient:
@@ -50,7 +50,7 @@ class BytesocksClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/create",
-                headers={"User-Agent": "LuckPerms/5.4.0"},
+                headers={"User-Agent": USER_AGENT},
                 allow_redirects=False,
             ) as resp:
                 # FIX: 官方严格返回 201

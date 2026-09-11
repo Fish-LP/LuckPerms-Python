@@ -115,9 +115,10 @@
 **关键指令摘要**：
 
 - `StorageBackend` 是协议类，定义 `extension: str`、`load(path: Path) -> dict`、`save(path: Path, data: dict)`。
-- `YAMLBackend` 和 `JSONBackend` 是内置实现，分别生成 `.yml` 和 `.json` 文件。
-- `LuckPermsStorage` 管理三个文件：`users.{ext}`、`groups.{ext}`、`tracks.{ext}`。
-- 数据格式：每个文件顶层键为 `"users"` / `"groups"` / `"tracks"`，值为 `{id: holder_dict}` 字典。
+- `YAMLBackend` 和 `JSONBackend` 是内置实现，分别生成 `.yml` 和 `.json` 文件；两者均通过临时文件 + `os.replace` 原子写入，损坏文件会抛出带路径的 `ValueError`。
+- `LuckPermsStorage` 采用**单文件布局** `luckperms.{ext}`：顶层键为 `"users"` / `"groups"` / `"tracks"`，值为 `{id: holder_dict}` 字典，一次原子写入保证三份数据整体一致。
+- 兼容旧版三文件布局（`users.{ext}` / `groups.{ext}` / `tracks.{ext}`）：首次加载检测到旧文件时自动迁移为单文件，旧文件保留不删。
+- 保留旧版 `load_users/save_users/load_groups/save_groups/load_tracks/save_tracks` API（内部基于单文件实现，读-改-写）。
 - 自定义后端只需实现 `StorageBackend` 协议，在 `LuckPermsManager(data_dir, backend=MyBackend())` 中注入。
 
 **对应文件/路径**：

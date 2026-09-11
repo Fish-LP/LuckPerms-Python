@@ -1,7 +1,7 @@
 """
 LuckPerms Bytebin API 客户端（官方协议兼容版）。
 
-修复：User-Agent 改为 LuckPerms/5.4.0/editor。
+User-Agent 使用官方格式 ``LuckPerms/<plugin-version>/editor``。
 """
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from typing import Any, Dict
 
 import aiohttp
 
-log = logging.getLogger("luckperms.webeditor")
+from ..constants import DEFAULT_BYTEBIN_URL, EDITOR_USER_AGENT
 
-DEFAULT_BYTEBIN_URL = "https://usercontent.luckperms.net"
+log = logging.getLogger("luckperms.webeditor")
 
 
 class BytebinClient:
@@ -47,7 +47,7 @@ class BytebinClient:
         headers = {
             "Content-Type": "application/json",
             "Content-Encoding": "gzip",
-            "User-Agent": "LuckPerms/5.4.0/editor",
+            "User-Agent": EDITOR_USER_AGENT,
         }
 
         async with aiohttp.ClientSession() as session:
@@ -97,7 +97,7 @@ class BytebinClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"{self.base_url}/{code}",
-                headers={"User-Agent": "LuckPerms/5.4.0/editor"},
+                headers={"User-Agent": EDITOR_USER_AGENT},
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()

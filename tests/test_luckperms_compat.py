@@ -89,8 +89,8 @@ class TestLuckPermsCompatibility:
         assert mgr2.get_group("vip").weight == 50
         assert mgr2.get_group("vip").get_meta("prefix") == "&e[VIP]"
 
-    def test_transient_context_priority(self):
-        """瞬态上下文优先级高于查询上下文。"""
+    def test_query_context_overrides_transient(self):
+        """显式查询上下文覆盖同名瞬态上下文（瞬态作为默认值）。"""
         users = {}
         groups = {}
         q = PermissionQuery(users, groups)

@@ -260,6 +260,22 @@ class TestTrack:
         assert t.groups == ["b"]
         assert t.remove_group("c") is False
 
+    def test_track_insert_group(self):
+        t = Track("t", ["a", "c"])
+        assert t.insert_group(1, "b") is True
+        assert t.groups == ["a", "b", "c"]
+
+    def test_track_insert_existing_group_moves(self):
+        t = Track("t", ["a", "b", "c"])
+        assert t.insert_group(2, "a") is True
+        assert t.groups == ["b", "c", "a"]
+
+    def test_track_insert_invalid_index(self):
+        t = Track("t", ["a"])
+        assert t.insert_group(-1, "b") is False
+        assert t.insert_group(2, "b") is False
+        assert t.groups == ["a"]
+
     def test_track_set_groups(self):
         t = Track("t", ["a", "b"])
         t.set_groups(["c", "d"])

@@ -355,3 +355,33 @@ class TestPermissionQuery:
         assert self.q.check("1", "plugin.fly") is False
         # 查询上下文覆盖瞬态上下文
         assert self.q.check("1", "plugin.fly", {"world": "nether"}) is True
+
+
+class TestExpiredDynamicParents:
+    """过期 group.xxx 动态父组节点的回归测试。"""
+
+    def test_expired_dynamic_parent_ignored(self):
+        """已过期的 group.xxx 节点不应再作为动态父组生效。"""
+        users = {}
+        groups = {"vip": Group("vip")}
+        groups["vip"].add_node(Node("plugin.vip", True))
+
+        u = User("1")
+        u.add_node(Node("group.vip", True, expiry=time.time() - 10))
+        users["1"] = u
+
+        q = PermissionQuery(users, groups)
+        assert q.check("1", "plugin.vip") is False
+
+    def test_active_dynamic_parent_works(self):
+        """未过期的 group.xxx 节点仍应正常生效。"""
+        users = {}
+        groups = {"vip": Group("vip")}
+        groups["vip"].add_node(Node("plugin.vip", True))
+
+        u = User("1")
+        u.add_node(Node("group.vip", True, expiry=time.time() + 3600))
+        users["1"] = u
+
+        q = PermissionQuery(users, groups)
+        assert q.check("1", "plugin.vip") is True
