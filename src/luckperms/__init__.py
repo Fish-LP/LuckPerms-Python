@@ -29,7 +29,7 @@ from .query import PermissionQuery
 from .storage import JSONBackend, StorageBackend, YAMLBackend
 from .webeditor import BytebinClient, BytesocksClient, WebEditorSession
 
-__version__ = "1.0.6"
+__version__ = "1.1.0"
 
 __all__ = [
     "LuckPermsManager",
