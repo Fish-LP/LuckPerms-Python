@@ -1,12 +1,11 @@
 """
 兼容性对照测试：构造与原版 LuckPerms 相同的用户/组/权限结构，验证 check() 结果。
 """
+
 import tempfile
 
-import pytest
-
 from luckperms.manager import LuckPermsManager
-from luckperms.models import Group, Node, User
+from luckperms.models import Node, User
 from luckperms.query import PermissionQuery
 
 

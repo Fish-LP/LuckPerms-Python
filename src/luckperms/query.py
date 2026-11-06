@@ -8,10 +8,10 @@ LuckPermsAPI 权限查询引擎。
 - 过期节点自动过滤
 - True/False 优先级（显式 False 覆盖通配符 True）
 """
+
 from __future__ import annotations
 
 import heapq
-import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import LuckPermsConfig
@@ -67,14 +67,16 @@ class PermissionQuery:
         result = self._resolve(permission, all_nodes)
         return result if result is not None else False
 
-    def check_user(self, user: User, permission: str, context: Optional[Dict[str, Any]] = None) -> bool:
+    def check_user(
+        self, user: User, permission: str, context: Optional[Dict[str, Any]] = None
+    ) -> bool:
         """检查指定用户对象是否拥有指定权限（不依赖 _users 缓存）。
-        
+
         Args:
             user: 用户对象。
             permission: 权限字符串。
             context: 查询上下文。
-            
+
         Return:
             若显式允许返回 True，显式拒绝或无任何匹配返回 False。
         """
@@ -95,7 +97,9 @@ class PermissionQuery:
         group = self._groups.get(group_name)
         if group is None:
             return False
-        ctx: dict[str, list[str]] = {k: [v] for k, v in group.transient_contexts.items()}
+        ctx: dict[str, list[str]] = {
+            k: [v] for k, v in group.transient_contexts.items()
+        }
         if context:
             ctx.update(Node.normalize_context(context))
         all_nodes = self._collect_group_nodes(group, ctx)
@@ -183,7 +187,9 @@ class PermissionQuery:
 
         return nodes
 
-    def _resolve(self, permission: str, nodes: List[Tuple[Node, int]]) -> Optional[bool]:
+    def _resolve(
+        self, permission: str, nodes: List[Tuple[Node, int]]
+    ) -> Optional[bool]:
         """解析权限值。
 
         优先级（从高到低）：
@@ -259,7 +265,7 @@ class PermissionQuery:
                 and not node.is_expired()
                 and node.matches_context(ctx)
             ):
-                groups.append(node.key[len(GROUP_NODE_PREFIX):])
+                groups.append(node.key[len(GROUP_NODE_PREFIX) :])
         return groups
 
     def _match_wildcard_dp(pattern_parts: list[str], string_parts: list[str]) -> bool:

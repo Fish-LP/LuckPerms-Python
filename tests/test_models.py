@@ -1,6 +1,7 @@
 """
 LuckPermsAPI 模型单元测试。
 """
+
 import time
 
 import pytest
@@ -54,7 +55,12 @@ class TestNode:
     def test_node_serde(self):
         n = Node("a.b", False, {"k": "v"}, 1234567890.0)
         d = n.to_dict()
-        assert d == {"key": "a.b", "value": False, "context": {"k": ["v"]}, "expiry": 1234567890.0}
+        assert d == {
+            "key": "a.b",
+            "value": False,
+            "context": {"k": ["v"]},
+            "expiry": 1234567890.0,
+        }
         n2 = Node.from_dict(d)
         assert n == n2
 

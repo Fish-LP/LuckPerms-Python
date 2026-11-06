@@ -6,17 +6,21 @@ LuckPermsAPI CLI 自动化回归测试。
 
     pytest tests/test_cli.py -v
 """
+
 from __future__ import annotations
 
-import os
 import tempfile
-from typing import Any
 
 import pytest
 
 from luckperms.cli import Formatter, LPCommand, LPCompleter
 from luckperms.manager import LuckPermsManager
-from luckperms.models import Group, Node, User
+from luckperms.models import User
+
+try:
+    from prompt_toolkit.document import Document
+except ImportError:
+    pytest.skip("prompt_toolkit 未安装")
 
 
 class CaptureFormatter(Formatter):
@@ -55,6 +59,7 @@ class TestCLIBase:
 
     def teardown_method(self) -> None:
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _run(self, command: str) -> list[str]:
@@ -104,7 +109,7 @@ class TestCLIBase:
     def test_user_list(self) -> None:
         self.mgr.create_user("a")
         self.mgr.create_user("b")
-        out = self._run("user list")
+        self._run("user list")
         assert len(self.mgr.list_users()) == 2
 
     def test_user_info(self) -> None:
@@ -143,7 +148,7 @@ class TestCLIBase:
     def test_group_list(self) -> None:
         self.mgr.create_group("a")
         self.mgr.create_group("b")
-        out = self._run("group list")
+        self._run("group list")
         assert len(self.mgr.list_groups()) == 2
 
     # ---------------------------------------------------------------
@@ -444,6 +449,7 @@ class TestCLIBase:
         assert any("ERROR:" in o for o in out)
         assert not any("Traceback" in o for o in out)
         assert not any('File "' in o for o in out)
+
     # ---------------------------------------------------------------
     def test_unknown_command(self) -> None:
         out = self._run("foobar")
@@ -483,6 +489,7 @@ class TestCLIDebugMode:
 
     def teardown_method(self) -> None:
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _run(self, command: str) -> list[str]:
@@ -510,37 +517,225 @@ class TestCLITabCompletion:
 
     def teardown_method(self) -> None:
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _complete(self, text: str) -> list[str]:
-        from prompt_toolkit.document import Document
+
         doc = Document(text, len(text))
         return [c.text for c in self.completer.get_completions(doc, None)]
 
     def test_complete_user_id(self) -> None:
-        try:
-            from prompt_toolkit.document import Document
-        except ImportError:
-            pytest.skip("prompt_toolkit 未安装")
 
         results = self._complete("user s")
         assert any("steve" in r for r in results)
 
     def test_complete_group_name(self) -> None:
-        try:
-            from prompt_toolkit.document import Document
-        except ImportError:
-            pytest.skip("prompt_toolkit 未安装")
 
         results = self._complete("group a")
         assert any("admin" in r for r in results)
 
     def test_complete_subcommand(self) -> None:
-        try:
-            from prompt_toolkit.document import Document
-        except ImportError:
-            pytest.skip("prompt_toolkit 未安装")
 
         results = self._complete("user steve ")
         assert any("info" in r for r in results)
         assert any("permission" in r for r in results)
+
+
+class TestCLITemporaryCommands:
+    """临时权限、meta、清理类命令的 CLI 测试。"""
+
+    def setup_method(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.mgr = LuckPermsManager(self.tmpdir)
+        self.mgr.create_group("default")
+        self.mgr.create_group("vip")
+        self.mgr.group_add_node("vip", "plugin.vip", True)
+        self.mgr.create_user("u1", "User One")
+        self.fmt = CaptureFormatter(debug=False)
+        self.cmd = LPCommand(self.mgr, self.fmt)
+
+    def teardown_method(self) -> None:
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run(self, command: str) -> list[str]:
+        self.fmt.outputs.clear()
+        self.cmd.execute(command)
+        return list(self.fmt.outputs)
+
+    # ---------------------------------------------------------------
+    # 临时权限
+    # ---------------------------------------------------------------
+    def test_settemp_command(self) -> None:
+        out = self._run("user u1 permission settemp plugin.a true 1h")
+        assert any("SUCCESS:设置临时权限" in o for o in out)
+        node = self.mgr.get_user("u1").get_node("plugin.a")
+        assert node is not None and node.expiry is not None
+
+    def test_settemp_with_modifier_flag(self) -> None:
+        assert any(
+            "SUCCESS" in o
+            for o in self._run("user u1 permission settemp plugin.a true 1h --deny")
+        )
+        out = self._run("user u1 permission settemp plugin.a true 1h --deny")
+        assert any("ERROR" in o for o in out)
+
+    def test_settemp_invalid_duration(self) -> None:
+        out = self._run("user u1 permission settemp plugin.a true nonsense")
+        assert any("ERROR" in o for o in out)
+        assert self.mgr.get_user("u1").get_node("plugin.a") is None
+
+    def test_unsettemp_command(self) -> None:
+        self._run("user u1 permission settemp plugin.a true 1h")
+        out = self._run("user u1 permission unsettemp plugin.a")
+        assert any("SUCCESS:已移除临时权限" in o for o in out)
+        assert self.mgr.get_user("u1").get_node("plugin.a") is None
+
+    def test_unsettemp_reduce_duration(self) -> None:
+        self._run("user u1 permission settemp plugin.a true 2h")
+        out = self._run("user u1 permission unsettemp plugin.a 30m")
+        assert any("SUCCESS:临时权限剩余" in o for o in out)
+
+    def test_permission_clear_command(self) -> None:
+        self.mgr.user_add_node("u1", "plugin.x", True)
+        out = self._run("user u1 permission clear")
+        assert any("SUCCESS:已清空权限节点" in o for o in out)
+        assert self.mgr.get_user("u1").nodes == []
+
+    def test_group_settemp_command(self) -> None:
+        out = self._run("group vip permission settemp plugin.g true 30m")
+        assert any("SUCCESS:设置临时权限" in o for o in out)
+        assert self.mgr.get_group("vip").get_node("plugin.g").expiry is not None
+
+    # ---------------------------------------------------------------
+    # 临时继承
+    # ---------------------------------------------------------------
+    def test_addtemp_parent(self) -> None:
+        out = self._run("user u1 parent addtemp vip 1d")
+        assert any("SUCCESS:添加临时继承" in o for o in out)
+        assert self.mgr.check("u1", "plugin.vip") is True
+
+    def test_removetemp_parent(self) -> None:
+        self._run("user u1 parent addtemp vip 1d")
+        out = self._run("user u1 parent removetemp vip")
+        assert any("SUCCESS:已移除临时权限" in o for o in out)
+        assert self.mgr.check("u1", "plugin.vip") is False
+
+    def test_parent_set_and_clear(self) -> None:
+        out = self._run("user u1 parent set vip")
+        assert any("SUCCESS:已设置父组" in o for o in out)
+        assert "vip" in self.mgr.get_user("u1").parents
+
+        out = self._run("user u1 parent clear")
+        assert any("SUCCESS:已清空父组" in o for o in out)
+        assert self.mgr.get_user("u1").parents == ["default"]
+
+    def test_parent_settrack(self) -> None:
+        self.mgr.create_track("staff", ["default", "vip"])
+        out = self._run("user u1 parent settrack staff 2")
+        assert any("SUCCESS:已设置轨道" in o for o in out)
+        assert "vip" in self.mgr.get_user("u1").parents
+
+    def test_parent_cleartrack(self) -> None:
+        self.mgr.create_track("staff", ["default", "vip"])
+        self._run("user u1 parent add vip")
+        out = self._run("user u1 parent cleartrack staff")
+        assert any("SUCCESS:已清除轨道" in o for o in out)
+        assert "vip" not in self.mgr.get_user("u1").parents
+
+    # ---------------------------------------------------------------
+    # meta
+    # ---------------------------------------------------------------
+    def test_meta_addprefix_and_info(self) -> None:
+        out = self._run("user u1 meta addprefix 100 &cAdmin")
+        assert any("SUCCESS:已设置 meta" in o for o in out)
+        out = self._run("user u1 meta info")
+        assert any("&cAdmin" in o for o in out)
+
+    def test_meta_set_and_unset_custom(self) -> None:
+        out = self._run("user u1 meta set home world")
+        assert any("SUCCESS:已设置 meta" in o for o in out)
+        out = self._run("user u1 meta unset home")
+        assert any("SUCCESS:已移除 meta" in o for o in out)
+
+    def test_meta_settemp(self) -> None:
+        out = self._run("user u1 meta set home world 1h")
+        assert any("SUCCESS:已设置临时 meta" in o for o in out)
+        assert self.mgr.get_user("u1").get_node("meta.home.world").expiry is not None
+
+    def test_meta_setprefix_replaces(self) -> None:
+        self._run("user u1 meta addprefix 1 Old")
+        self._run("user u1 meta setprefix 2 New")
+        assert self.mgr.get_meta("u1", "prefix") == "New"
+
+    def test_meta_removeprefix(self) -> None:
+        self._run("user u1 meta addprefix 5 X")
+        out = self._run("user u1 meta removeprefix 5")
+        assert any("SUCCESS:已移除 prefix" in o for o in out)
+        assert self.mgr.get_meta("u1", "prefix") is None
+
+    def test_meta_clear(self) -> None:
+        self._run("user u1 meta addprefix 1 A")
+        self._run("user u1 meta addsuffix 1 B")
+        out = self._run("user u1 meta clear")
+        assert any("SUCCESS:已清空 meta 节点" in o for o in out)
+        assert self.mgr.get_meta("u1", "prefix") is None
+
+    # ---------------------------------------------------------------
+    # 组与轨道
+    # ---------------------------------------------------------------
+    def test_group_listmembers(self) -> None:
+        out = self._run("group vip listmembers")
+        assert any("(无成员)" in o for o in out)
+        self._run("user u1 parent add vip")
+        out = self._run("group vip listmembers")
+        assert any("u1" in o for o in out)
+
+    def test_group_setdisplayname(self) -> None:
+        out = self._run("group vip setdisplayname VIP组")
+        assert any("SUCCESS" in o for o in out)
+        assert self.mgr.get_group("vip").get_meta("displayname") == "VIP组"
+
+    def test_group_clear(self) -> None:
+        self.mgr.group_add_node("vip", "plugin.x", True)
+        out = self._run("group vip clear")
+        assert any("SUCCESS:已清空组" in o for o in out)
+        assert self.mgr.get_group("vip").nodes == []
+
+    def test_user_showtracks(self) -> None:
+        self.mgr.create_track("staff", ["default", "vip"])
+        out = self._run("user u1 showtracks")
+        assert any("staff" in o for o in out)
+
+    def test_user_clear(self) -> None:
+        self.mgr.user_add_node("u1", "plugin.x", True)
+        self._run("user u1 parent add vip")
+        out = self._run("user u1 clear")
+        assert any("SUCCESS:已清空用户" in o for o in out)
+        assert self.mgr.get_user("u1").nodes == []
+
+    def test_track_clear_and_rename(self) -> None:
+        self.mgr.create_track("t", ["default", "vip"])
+        out = self._run("track t clear")
+        assert any("SUCCESS:已清空轨道" in o for o in out)
+        out = self._run("track t rename team")
+        assert any("SUCCESS:轨道 t 已重命名为 team" in o for o in out)
+
+    def test_track_insert_new_order(self) -> None:
+        self.mgr.create_track("t", ["default"])
+        out = self._run("track t insert vip 1")
+        assert any("SUCCESS:已插入 vip 到位置 1" in o for o in out)
+        assert self.mgr.get_track("t").groups == ["default", "vip"]
+
+    # ---------------------------------------------------------------
+    # verbose
+    # ---------------------------------------------------------------
+    def test_verbose_listen_and_off(self) -> None:
+        out = self._run("verbose u1")
+        assert any("已开启 verbose 监听" in o for o in out)
+        self.mgr.check("u1", "plugin.zzz")
+        assert any("[DENY]" in o for o in self.fmt.outputs)
+        out = self._run("verbose off")
+        assert any("已关闭" in o for o in out)

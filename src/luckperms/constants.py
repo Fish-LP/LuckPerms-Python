@@ -4,6 +4,7 @@ LuckPermsAPI 共享常量。
 集中管理跨模块复用的魔法值（版本、协议、前缀、存储文件名等），
 避免在多处重复硬编码。
 """
+
 from __future__ import annotations
 
 # ------------------------------------------------------------------
@@ -26,6 +27,11 @@ DEFAULT_GROUP_NAME = "default"
 GROUP_NODE_PREFIX = "group."
 WEIGHT_NODE_PREFIX = "weight."
 META_PREFIXES = ("prefix.", "suffix.", "displayname.", WEIGHT_NODE_PREFIX)
+CUSTOM_META_PREFIX = "meta."
+
+# 临时权限修饰符（与原版一致）
+TEMP_MODIFIERS = ("accumulate", "replace", "deny")
+DEFAULT_TEMP_MODIFIER = "accumulate"
 
 # ------------------------------------------------------------------
 # 查询引擎

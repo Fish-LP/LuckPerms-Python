@@ -1,13 +1,12 @@
 """
 LuckPermsAPI 存储层单元测试。
 """
-import json
+
 import os
 import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 from luckperms.storage import JSONBackend, LuckPermsStorage, YAMLBackend
 
@@ -67,7 +66,7 @@ class TestJSONBackend:
         backend = JSONBackend()
         backend.save(path, {"a": 1})
         content = path.read_text()
-        assert "\"a\": 1" in content
+        assert '"a": 1' in content
 
 
 class TestLuckPermsStorage:

@@ -5,6 +5,7 @@ LuckPermsAPI 持久化存储。
 同时兼容旧版三文件布局（users/groups/tracks），首次加载时自动迁移。
 接口抽象便于替换为数据库等高级后端。
 """
+
 from __future__ import annotations
 
 import json
@@ -58,11 +59,9 @@ class StorageBackend(Protocol):
 
     extension: str
 
-    def load(self, path: Path) -> dict[str, Any]:
-        ...
+    def load(self, path: Path) -> dict[str, Any]: ...
 
-    def save(self, path: Path, data: dict[str, Any]) -> None:
-        ...
+    def save(self, path: Path, data: dict[str, Any]) -> None: ...
 
 
 class YAMLBackend:
@@ -83,7 +82,8 @@ class YAMLBackend:
     def save(self, path: Path, data: dict[str, Any]) -> None:
         def _write(f: TextIO) -> None:
             yaml.dump(
-                data, f,
+                data,
+                f,
                 allow_unicode=True,
                 sort_keys=False,
                 default_flow_style=False,

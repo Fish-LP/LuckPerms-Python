@@ -7,6 +7,7 @@ LuckPerms Bytesocks WebSocket 客户端（官方协议兼容版）。
 3. 支持 hello / connected / change-request / ping 消息类型
 4. 自动回复 hello-reply（state=trusted）和 pong
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -126,7 +127,10 @@ class BytesocksClient:
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         await self._handle_message(msg.data)
-                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    elif msg.type in (
+                        aiohttp.WSMsgType.CLOSED,
+                        aiohttp.WSMsgType.ERROR,
+                    ):
                         break
         except asyncio.CancelledError:
             raise
@@ -162,7 +166,9 @@ class BytesocksClient:
         if msg_type == "hello":
             nonce = msg.get("nonce", "")
             # FIX: 自动回复 hello-reply 建立信任（简化版）
-            await self._send({"type": "hello-reply", "nonce": nonce, "state": "trusted"})
+            await self._send(
+                {"type": "hello-reply", "nonce": nonce, "state": "trusted"}
+            )
             if self.on_hello:
                 try:
                     await self.on_hello(nonce)
@@ -198,7 +204,9 @@ class BytesocksClient:
         frame = {"msg": inner, "signature": ""}  # 简化：空签名
         await self._ws.send_str(json.dumps(frame))
 
-    async def send_change_response(self, state: str, new_session_code: Optional[str] = None) -> None:
+    async def send_change_response(
+        self, state: str, new_session_code: Optional[str] = None
+    ) -> None:
         """发送 change-response（change-request 的回执）。"""
         payload: dict = {"type": "change-response", "state": state}
         if new_session_code:

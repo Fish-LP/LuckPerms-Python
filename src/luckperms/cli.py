@@ -31,13 +31,15 @@ import logging
 import os
 import shlex
 import tempfile
-from typing import Any, Optional, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any, Optional
 
 # 尝试导入可选依赖
 try:
     from rich.console import Console
     from rich.table import Table
     from rich.tree import Tree as RichTree
+
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
@@ -50,6 +52,7 @@ try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.document import Document
+
     HAS_PROMPT_TOOLKIT = True
 except ImportError:
     HAS_PROMPT_TOOLKIT = False
@@ -58,6 +61,13 @@ if TYPE_CHECKING:
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.document import Document
 
+from .constants import (
+    CUSTOM_META_PREFIX,
+    DEFAULT_TEMP_MODIFIER,
+    GROUP_NODE_PREFIX,
+    TEMP_MODIFIERS,
+)
+from .duration import DurationParseError, format_duration, parse_duration
 from .manager import LuckPermsManager
 from .models import Group, Node, Track, User
 from .webeditor import WebEditorSession
@@ -114,10 +124,11 @@ class Formatter:
             table.add_column("Value", style="green")
             table.add_column("Context", style="yellow")
             table.add_column("Expiry", style="dim")
-            import time
             for n in nodes:
                 ctx = ", ".join(f"{k}={v}" for k, v in n.context.items()) or "-"
-                exp = "Never" if n.expiry is None else f"{int(n.expiry - time.time())}s"
+                exp = format_duration(
+                    None if n.expiry is None else n.expiry - time.time()
+                )
                 val = "[green]True[/green]" if n.value else "[red]False[/red]"
                 table.add_row(n.key, val, ctx, exp)
             self.console.print(table)
@@ -125,7 +136,10 @@ class Formatter:
             self.print(f"--- {title} ---")
             for n in nodes:
                 ctx = f" context={n.context}" if n.context else ""
-                exp = f" expiry={n.expiry}" if n.expiry else ""
+                if n.expiry is None:
+                    exp = ""
+                else:
+                    exp = f" expiry={format_duration(n.expiry - time.time())}"
                 self.print(f"  {n.key} = {n.value}{ctx}{exp}")
 
     def table_users(self, users: list[User]) -> None:
@@ -143,7 +157,9 @@ class Formatter:
             self.print("--- Users ---")
             for u in users:
                 groups = ", ".join(u.parents) or "-"
-                self.print(f"  {u.unique_id} | {u.display_name} | groups={groups} | nodes={len(u.nodes)}")
+                self.print(
+                    f"  {u.unique_id} | {u.display_name} | groups={groups} | nodes={len(u.nodes)}"
+                )
 
     def table_groups(self, groups: list[Group]) -> None:
         if self.console:
@@ -155,13 +171,17 @@ class Formatter:
             table.add_column("Nodes", style="dim")
             for g in groups:
                 parents = ", ".join(g.parents) or "-"
-                table.add_row(g.name, g.display_name, str(g.weight), parents, str(len(g.nodes)))
+                table.add_row(
+                    g.name, g.display_name, str(g.weight), parents, str(len(g.nodes))
+                )
             self.console.print(table)
         else:
             self.print("--- Groups ---")
             for g in groups:
                 parents = ", ".join(g.parents) or "-"
-                self.print(f"  {g.name} | {g.display_name} | weight={g.weight} | parents={parents} | nodes={len(g.nodes)}")
+                self.print(
+                    f"  {g.name} | {g.display_name} | weight={g.weight} | parents={parents} | nodes={len(g.nodes)}"
+                )
 
     def table_tracks(self, tracks: list[Track]) -> None:
         if self.console:
@@ -176,7 +196,9 @@ class Formatter:
             for t in tracks:
                 self.print(f"  {t.name}: {' -> '.join(t.groups)}")
 
-    def tree_holder(self, mgr: LuckPermsManager, holder_id: str, depth: int = 5) -> None:
+    def tree_holder(
+        self, mgr: LuckPermsManager, holder_id: str, depth: int = 5
+    ) -> None:
         """以树形展示继承链。"""
         user = mgr.get_user(holder_id)
         group = mgr.get_group(holder_id)
@@ -196,7 +218,14 @@ class Formatter:
             self.print(f"{holder_id} ({role})")
             self._build_tree_plain(mgr, target, 0, depth, set())
 
-    def _build_tree_rich(self, mgr: LuckPermsManager, target: Any, tree: Any, depth: int, visited: set[str]) -> None:
+    def _build_tree_rich(
+        self,
+        mgr: LuckPermsManager,
+        target: Any,
+        tree: Any,
+        depth: int,
+        visited: set[str],
+    ) -> None:
         if depth <= 0:
             return
         parents = getattr(target, "parents", [])
@@ -214,7 +243,14 @@ class Formatter:
                 branch.add(f"{n.key} = {val}")
             self._build_tree_rich(mgr, g, branch, depth - 1, visited)
 
-    def _build_tree_plain(self, mgr: LuckPermsManager, target: Any, indent: int, depth: int, visited: set[str]) -> None:
+    def _build_tree_plain(
+        self,
+        mgr: LuckPermsManager,
+        target: Any,
+        indent: int,
+        depth: int,
+        visited: set[str],
+    ) -> None:
         if depth <= 0:
             return
         parents = getattr(target, "parents", [])
@@ -227,7 +263,9 @@ class Formatter:
             g = mgr.get_group(pname)
             if not g:
                 continue
-            self.print(f"{prefix}└── {g.name} (weight={g.weight}, nodes={len(g.nodes)})")
+            self.print(
+                f"{prefix}└── {g.name} (weight={g.weight}, nodes={len(g.nodes)})"
+            )
             for n in g.nodes:
                 val = "T" if n.value else "F"
                 self.print(f"{prefix}    ├── {n.key} = {val}")
@@ -241,16 +279,70 @@ class LPCompleter(Completer):
     """LuckPerms 命令自动补全。"""
 
     COMMANDS = [
-        "user ", "group ", "track ",
-        "check ", "verbose ", "tree ",
-        "editor", "applyedits ", "sync", "info", "help", "exit", "quit",
+        "user ",
+        "group ",
+        "track ",
+        "check ",
+        "verbose ",
+        "tree ",
+        "editor",
+        "applyedits ",
+        "sync",
+        "info",
+        "help",
+        "exit",
+        "quit",
     ]
 
-    USER_SUB = ["info", "permission", "parent", "promote", "demote", "create", "delete", "list"]
-    PERM_SUB = ["set ", "unset ", "check ", "info"]
-    PARENT_SUB = ["add ", "remove ", "info"]
-    GROUP_SUB = ["info", "permission", "parent", "setweight", "create", "delete", "list"]
-    TRACK_SUB = ["info", "append", "insert", "remove", "create", "delete", "list"]
+    USER_SUB = [
+        "info",
+        "permission",
+        "parent",
+        "meta",
+        "promote",
+        "demote",
+        "showtracks",
+        "clear",
+        "create",
+        "delete",
+        "list",
+    ]
+    PERM_SUB = ["set ", "settemp ", "unset ", "unsettemp ", "check ", "clear", "info"]
+    PARENT_SUB = [
+        "add ",
+        "addtemp ",
+        "remove ",
+        "removetemp ",
+        "set ",
+        "settrack ",
+        "cleartrack ",
+        "clear",
+        "info",
+    ]
+    GROUP_SUB = [
+        "info",
+        "permission",
+        "parent",
+        "meta",
+        "setweight",
+        "setdisplayname",
+        "listmembers",
+        "clear",
+        "create",
+        "delete",
+        "list",
+    ]
+    TRACK_SUB = [
+        "info",
+        "append",
+        "insert",
+        "remove",
+        "clear",
+        "rename",
+        "create",
+        "delete",
+        "list",
+    ]
 
     def __init__(self, mgr: LuckPermsManager) -> None:
         self.mgr = mgr
@@ -275,7 +367,11 @@ class LPCompleter(Completer):
             return
 
         cmd = words[0]
-        if cmd in ("user", "verbose", "tree") and len(words) == 2 and not text.endswith(" "):
+        if (
+            cmd in ("user", "verbose", "tree")
+            and len(words) == 2
+            and not text.endswith(" ")
+        ):
             for uid in self.mgr._users:
                 if uid.startswith(words[1]):
                     yield Completion(uid, start_position=-len(words[1]))
@@ -415,6 +511,7 @@ class LPCommand:
             self.fmt.error(str(e))
             if self.fmt._debug:
                 import traceback
+
                 for line in traceback.format_exc().split("\n"):
                     if line.strip():
                         self.fmt.error(f"  {line}")
@@ -426,19 +523,48 @@ class LPCommand:
             "LuckPerms 交互式终端",
             "",
             "命令前缀可选: lp, /lp, 或无前缀",
+            "时长格式: 30m / 12h / 7d / 1mo3d13h45m / 3600 / permanent",
             "",
             "用户管理",
             "  user <id> info                          查看用户详情",
             "  user <id> permission info               列出用户权限",
-            "  user <id> permission set <node> [T/F] [ctx...] [--duration N]",
-            "                                          设置权限",
+            "  user <id> permission set <node> [T/F] [ctx...] [--duration D]",
+            "                                          设置权限（默认永久）",
+            "  user <id> permission settemp <node> <T/F> <duration>",
+            "                                          [--modifier accumulate|replace|deny] [ctx...]",
+            "                                          设置临时权限",
             "  user <id> permission unset <node> [ctx...]",
             "                                          移除权限",
+            "  user <id> permission unsettemp <node> [duration] [ctx...]",
+            "                                          移除/缩短临时权限",
+            "  user <id> permission clear              清空全部权限节点",
             "  user <id> permission check <node> [ctx...]",
             "                                          检查权限",
-            "  user <id> parent info                   列出继承组",
+            "  user <id> parent info                   列出继承组（含临时）",
             "  user <id> parent add <group>            加入组",
+            "  user <id> parent addtemp <group> <duration>",
+            "                                          临时加入组",
             "  user <id> parent remove <group>         移出组",
+            "  user <id> parent removetemp <group> [duration]",
+            "                                          移除临时继承",
+            "  user <id> parent set <group>            覆盖父组",
+            "  user <id> parent clear                  清空父组（回到 default）",
+            "  user <id> parent settrack <track> <index|group>",
+            "                                          设置轨道位置",
+            "  user <id> parent cleartrack <track>     清除轨道父组",
+            "  user <id> meta info                     查看元数据",
+            "  user <id> meta set <key> <value> [duration] [ctx...]",
+            "                                          设置元数据",
+            "  user <id> meta unset <key> [ctx...]     移除元数据",
+            "  user <id> meta addprefix <priority> <prefix> [--duration D]",
+            "  user <id> meta addsuffix <priority> <suffix> [--duration D]",
+            "  user <id> meta setprefix [priority] <prefix>",
+            "  user <id> meta setsuffix [priority] <suffix>",
+            "  user <id> meta removeprefix <priority> [prefix]",
+            "  user <id> meta removesuffix <priority> [suffix]",
+            "  user <id> meta clear                    清空全部 meta 节点",
+            "  user <id> showtracks                    查看轨道位置",
+            "  user <id> clear                         清空节点与父组",
             "  user <id> promote <track>               沿轨道晋升",
             "  user <id> demote <track>                沿轨道降级",
             "  user create <id> [--display-name NAME]  创建用户",
@@ -448,8 +574,12 @@ class LPCommand:
             "组管理",
             "  group <name> info                       查看组详情",
             "  group <name> permission ...             同 user permission",
-            "  group <name> parent info/add/remove ... 继承管理",
+            "  group <name> parent ...                 继承管理（同 user parent）",
+            "  group <name> meta ...                   元数据管理（同 user meta）",
             "  group <name> setweight <n>              设置权重",
+            "  group <name> setdisplayname <name>      设置显示名",
+            "  group <name> listmembers                列出直接成员",
+            "  group <name> clear                      清空节点与父组",
             "  group create <name> [--display-name NAME] [--weight N]",
             "                                          创建组",
             "  group delete <name>                     删除组",
@@ -458,8 +588,10 @@ class LPCommand:
             "轨道管理",
             "  track <name> info                       查看轨道",
             "  track <name> append <group>             追加组",
-            "  track <name> insert <idx> <group>       插入组",
+            "  track <name> insert <group> <position>  插入组（兼容 <position> <group>）",
             "  track <name> remove <group>             移除组",
+            "  track <name> clear                      清空轨道",
+            "  track <name> rename <new name>          重命名轨道",
             "  track create <name> [g1 g2 ...]         创建轨道",
             "  track delete <name>                     删除轨道",
             "  track list                              列出所有轨道",
@@ -495,7 +627,9 @@ class LPCommand:
         async def _run_editor() -> None:
             def get_payload() -> dict:
                 p = self.mgr.to_webeditor_payload()
-                self.fmt.debug(f"payload: holders={len(p.get('permissionHolders', []))} tracks={len(p.get('tracks', []))}")
+                self.fmt.debug(
+                    f"payload: holders={len(p.get('permissionHolders', []))} tracks={len(p.get('tracks', []))}"
+                )
                 return p
 
             def apply_changes(payload: dict) -> None:
@@ -511,7 +645,9 @@ class LPCommand:
             try:
                 url = await session.open()
                 self.fmt.success(f"Web Editor 已启动: {url}")
-                self.fmt.info("在浏览器中编辑并 Save 后，返回此终端执行 applyedits 命令应用更改")
+                self.fmt.info(
+                    "在浏览器中编辑并 Save 后，返回此终端执行 applyedits 命令应用更改"
+                )
                 while session.is_active:
                     await asyncio.sleep(1)
             except asyncio.CancelledError:
@@ -520,6 +656,7 @@ class LPCommand:
                 self.fmt.error(f"启动 Web Editor 失败: {e}")
                 if self.fmt._debug:
                     import traceback
+
                     for line in traceback.format_exc().split("\n"):
                         if line.strip():
                             self.fmt.error(f"  {line}")
@@ -556,25 +693,34 @@ class LPCommand:
                     gdel = payload.get("groupDeletions", [])
                     tdel = payload.get("trackDeletions", [])
                     udel = payload.get("userDeletions", [])
-                    self.fmt.debug(f"增量格式: changes={len(changes)} groupDel={gdel} trackDel={tdel} userDel={udel}")
+                    self.fmt.debug(
+                        f"增量格式: changes={len(changes)} groupDel={gdel} trackDel={tdel} userDel={udel}"
+                    )
                     for c in changes[:3]:
-                        self.fmt.debug(f"  change type={c.get('type')} id={c.get('id')} nodes={len(c.get('nodes', []))}")
+                        self.fmt.debug(
+                            f"  change type={c.get('type')} id={c.get('id')} nodes={len(c.get('nodes', []))}"
+                        )
                 else:
                     holders = payload.get("permissionHolders", [])
                     tracks = payload.get("tracks", [])
-                    self.fmt.debug(f"全量格式: holders={len(holders)} tracks={len(tracks)}")
+                    self.fmt.debug(
+                        f"全量格式: holders={len(holders)} tracks={len(tracks)}"
+                    )
 
                 self.fmt.debug("开始调用 apply_webeditor_changes ...")
                 self.mgr.apply_webeditor_changes(payload)
                 self.mgr.save_all()
 
-                self.fmt.debug(f"应用后内存状态: users={len(self.mgr._users)} groups={len(self.mgr._groups)} tracks={len(self.mgr._tracks)}")
+                self.fmt.debug(
+                    f"应用后内存状态: users={len(self.mgr._users)} groups={len(self.mgr._groups)} tracks={len(self.mgr._tracks)}"
+                )
                 self.fmt.success(f"已应用 edits: {code}")
                 self.fmt.info("提示: 建议重新运行 editor 生成新的编辑器 URL")
             except Exception as e:
                 self.fmt.error(f"应用 edits 失败: {e}")
                 if self.fmt._debug:
                     import traceback
+
                     for line in traceback.format_exc().split("\n"):
                         if line.strip():
                             self.fmt.error(f"  {line}")
@@ -585,6 +731,7 @@ class LPCommand:
             self.fmt.error(f"应用 edits 失败: {e}")
             if self.fmt._debug:
                 import traceback
+
                 for line in traceback.format_exc().split("\n"):
                     if line.strip():
                         self.fmt.error(f"  {line}")
@@ -601,6 +748,7 @@ class LPCommand:
     def _cmd_verbose(self, args: list[str]) -> None:
         if not args or args[0] == "off":
             self._verbose_user = None
+            self.mgr.set_verbose(None)
             self.fmt.info("已关闭 verbose 监听")
             return
         user_id = args[0]
@@ -608,7 +756,16 @@ class LPCommand:
             self.fmt.error(f"用户 '{user_id}' 不存在")
             return
         self._verbose_user = user_id
+        self.mgr.set_verbose(user_id, self._on_verbose_check)
         self.fmt.info(f"已开启 verbose 监听: {user_id}")
+
+    def _on_verbose_check(
+        self, user_id: str, permission: str, context: Any, result: bool
+    ) -> None:
+        """verbose 回调：打印每次权限检查的结果。"""
+        flag = "ALLOW" if result else "DENY"
+        ctx = f" {context}" if context else ""
+        self.fmt.print(f"  [{flag}] {permission}{ctx}")
 
     def _cmd_tree(self, args: list[str]) -> None:
         if not args:
@@ -670,6 +827,20 @@ class LPCommand:
             self._cmd_permission(user, sub_args)
         elif sub == "parent":
             self._cmd_parent(user, sub_args)
+        elif sub == "meta":
+            self._cmd_meta(user, sub_args)
+        elif sub == "showtracks":
+            tracks = self.mgr.user_show_tracks(uid)
+            if not tracks:
+                self.fmt.print("  用户不在任何轨道上")
+            for track_name, position in tracks:
+                self.fmt.print(f"  {track_name}: 第 {position} 级")
+        elif sub == "clear":
+            removed_nodes = self.mgr.clear_permissions(uid)
+            removed_parents = self.mgr.clear_parents(uid)
+            self.fmt.success(
+                f"已清空用户 {uid}：权限节点 {removed_nodes} 个，父组 {removed_parents} 个"
+            )
         elif sub == "promote":
             if not sub_args:
                 self.fmt.error("用法: user <id> promote <track>")
@@ -702,7 +873,9 @@ class LPCommand:
             sub_args = args[1:]
             if sub == "create":
                 if not sub_args:
-                    self.fmt.error("用法: group create <name> [--display-name NAME] [--weight N]")
+                    self.fmt.error(
+                        "用法: group create <name> [--display-name NAME] [--weight N]"
+                    )
                     return
                 name = sub_args[0]
                 display = self._pop_flag(sub_args[1:], "--display-name") or name
@@ -742,6 +915,26 @@ class LPCommand:
             self._cmd_permission(group, sub_args)
         elif sub == "parent":
             self._cmd_parent(group, sub_args)
+        elif sub == "meta":
+            self._cmd_meta(group, sub_args)
+        elif sub == "setdisplayname":
+            if not sub_args:
+                self.fmt.error("用法: group <name> setdisplayname <name>")
+                return
+            self.mgr.set_group_display_name(name, sub_args[0])
+            self.fmt.success(f"组 {name} 显示名已设为 {sub_args[0]}")
+        elif sub == "listmembers":
+            members = self.mgr.list_group_members(name)
+            if not members:
+                self.fmt.print("  (无成员)")
+            for member in members:
+                self.fmt.print(f"  {member}")
+        elif sub == "clear":
+            removed_nodes = self.mgr.clear_permissions(name, is_group=True)
+            removed_parents = self.mgr.clear_parents(name, is_group=True)
+            self.fmt.success(
+                f"已清空组 {name}：权限节点 {removed_nodes} 个，父组 {removed_parents} 个"
+            )
         elif sub == "setweight":
             if not sub_args:
                 self.fmt.error("用法: group <name> setweight <n>")
@@ -804,16 +997,23 @@ class LPCommand:
             self.fmt.success(f"已追加 {sub_args[0]} 到轨道 {name}")
         elif sub == "insert":
             if len(sub_args) < 2:
-                self.fmt.error("用法: track <name> insert <index> <group>")
+                self.fmt.error("用法: track <name> insert <group> <position>")
                 return
-            idx = int(sub_args[0])
-            gname = sub_args[1]
-            # NOTE: 不能直接 track.groups.insert(...)，groups 返回的是副本
-            if track.insert_group(idx, gname):
-                self.mgr.save_all()
-                self.fmt.success(f"已插入 {gname} 到位置 {idx}")
+            # 兼容历史写法 insert <position> <group>；原版顺序为 <group> <position>
+            if sub_args[0].isdigit() and not sub_args[1].isdigit():
+                gname, position_text = sub_args[1], sub_args[0]
             else:
-                self.fmt.error(f"插入失败: 无效索引 {idx}")
+                gname, position_text = sub_args[0], sub_args[1]
+            if not position_text.isdigit():
+                self.fmt.error(f"无效位置: {position_text}")
+                return
+            position = int(position_text)
+            # NOTE: 不能直接 track.groups.insert(...)，groups 返回的是副本
+            if track.insert_group(position, gname):
+                self.mgr.save_all()
+                self.fmt.success(f"已插入 {gname} 到位置 {position}")
+            else:
+                self.fmt.error(f"插入失败: 无效位置 {position}")
         elif sub == "remove":
             if not sub_args:
                 self.fmt.error("用法: track <name> remove <group>")
@@ -823,6 +1023,15 @@ class LPCommand:
                 self.fmt.success(f"已从轨道 {name} 移除 {sub_args[0]}")
             else:
                 self.fmt.error(f"轨道中不存在该组: {sub_args[0]}")
+        elif sub == "clear":
+            removed = self.mgr.clear_track(name)
+            self.fmt.success(f"已清空轨道 {name}（移除 {removed} 个组）")
+        elif sub == "rename":
+            if not sub_args:
+                self.fmt.error("用法: track <name> rename <new name>")
+                return
+            self.mgr.rename_track(name, sub_args[0])
+            self.fmt.success(f"轨道 {name} 已重命名为 {sub_args[0]}")
         else:
             self.fmt.error(f"未知子命令: track {sub}")
 
@@ -837,89 +1046,225 @@ class LPCommand:
             self.fmt.table_nodes(holder.nodes, "Nodes")
             return
 
-        node_key = ''
-        if sub in ("set", "unset", "check"):
-            if not sub_args:
-                self.fmt.error(f"用法: permission {sub} <node> ...")
+        is_group = isinstance(holder, Group)
+        holder_id = holder.name if is_group else holder.unique_id
+
+        if sub == "clear":
+            removed = self.mgr.clear_permissions(holder_id, is_group)
+            self.fmt.success(f"已清空权限节点（{removed} 个）")
+            return
+
+        if sub not in ("set", "settemp", "unset", "unsettemp", "check"):
+            self.fmt.error(f"未知子命令: permission {sub}")
+            return
+        if not sub_args:
+            self.fmt.error(f"用法: permission {sub} <node> ...")
+            return
+
+        node_key = sub_args[0]
+        rest = sub_args[1:]
+
+        if sub in ("set", "settemp"):
+            try:
+                value, duration, modifier, ctx_args = self._parse_node_options(
+                    rest, require_duration=(sub == "settemp")
+                )
+            except DurationParseError as e:
+                self.fmt.error(str(e))
                 return
-            node_key = sub_args[0]
-
-        if sub == "set":
-            assert node_key
-            value = True
-            duration: Optional[int] = None
-            filtered = []
-            i = 0
-            while i < len(sub_args[1:]):
-                a = sub_args[1 + i]
-                if a.lower() in ("true", "t", "1"):
-                    value = True
-                elif a.lower() in ("false", "f", "0"):
-                    value = False
-                elif a == "--duration" and i + 1 < len(sub_args[1:]):
-                    duration = int(sub_args[1 + i + 1])
-                    i += 1
+            ctx = self._parse_context(ctx_args)
+            try:
+                if is_group:
+                    self.mgr.group_add_node(
+                        holder_id, node_key, value, ctx, duration, modifier
+                    )
                 else:
-                    filtered.append(a)
-                i += 1
-            ctx = self._parse_context(filtered)
-
-            if isinstance(holder, User):
-                self.mgr.user_add_node(holder.unique_id, node_key, value, ctx, duration)
+                    self.mgr.user_add_node(
+                        holder_id, node_key, value, ctx, duration, modifier
+                    )
+            except ValueError as e:
+                self.fmt.error(str(e))
+                return
+            if duration is None:
+                self.fmt.success(f"设置权限: {node_key} = {value}")
             else:
-                self.mgr.group_add_node(holder.name, node_key, value, ctx)
-            self.fmt.success(f"设置权限: {node_key} = {value}")
+                self.fmt.success(
+                    f"设置临时权限: {node_key} = {value}，"
+                    f"有效期 {format_duration(duration)}"
+                )
+            return
 
-        elif sub == "unset":
-            ctx = self._parse_context(sub_args[1:])
-            if isinstance(holder, User):
-                ok = self.mgr.user_remove_node(holder.unique_id, node_key, ctx)
-            else:
-                ok = self.mgr.group_remove_node(holder.name, node_key, ctx)
+        if sub == "unsettemp":
+            try:
+                reduce_seconds, ctx_args = self._parse_optional_duration(rest)
+            except DurationParseError as e:
+                self.fmt.error(str(e))
+                return
+            ctx = self._parse_context(ctx_args)
+            self._reduce_temp_node(holder, node_key, ctx, reduce_seconds)
+            return
+
+        if sub == "unset":
+            ctx = self._parse_context(rest)
+            ok = (
+                self.mgr.group_remove_node(holder_id, node_key, ctx)
+                if is_group
+                else self.mgr.user_remove_node(holder_id, node_key, ctx)
+            )
             if ok:
                 self.fmt.success(f"移除权限: {node_key}")
             else:
                 self.fmt.error(f"权限不存在: {node_key}")
+            return
 
-        elif sub == "check":
-            ctx = self._parse_context(sub_args[1:])
-            if isinstance(holder, User):
-                result = self.mgr.check(holder.unique_id, node_key, ctx)
-            else:
-                result = self.mgr.check_group(holder.name, node_key, ctx)
-            self.fmt.print(f"check({holder.name if isinstance(holder, Group) else holder.unique_id}, {node_key}, {ctx}) = {result}")
+        # check
+        ctx = self._parse_context(rest)
+        result = (
+            self.mgr.check_group(holder_id, node_key, ctx)
+            if is_group
+            else self.mgr.check(holder_id, node_key, ctx)
+        )
+        self.fmt.print(f"check({holder_id}, {node_key}, {ctx}) = {result}")
 
     def _cmd_parent(self, holder: Any, args: list[str]) -> None:
+        is_group = isinstance(holder, Group)
+        holder_id = holder.name if is_group else holder.unique_id
+
         if not args:
-            self.fmt.print(f"Parents: {holder.parents}")
+            self._print_parents(holder)
             return
         sub = args[0]
         sub_args = args[1:]
 
         if sub == "info":
-            self.fmt.print(f"Parents: {holder.parents}")
-        elif sub == "add":
+            self._print_parents(holder)
+            return
+
+        if sub in ("add", "addtemp"):
             if not sub_args:
-                self.fmt.error("用法: parent add <group>")
+                self.fmt.error(f"用法: parent {sub} <group> [duration]")
                 return
             gname = sub_args[0]
-            if isinstance(holder, User):
-                self.mgr.user_add_group(holder.unique_id, gname)
+            try:
+                duration, modifier, ctx_args = self._parse_temp_options(
+                    sub_args[1:], require_duration=(sub == "addtemp")
+                )
+            except DurationParseError as e:
+                self.fmt.error(str(e))
+                return
+            ctx = self._parse_context(ctx_args)
+            try:
+                if is_group:
+                    self.mgr.group_inherit(holder_id, gname, duration, ctx, modifier)
+                else:
+                    self.mgr.user_add_group(holder_id, gname, duration, ctx, modifier)
+            except (KeyError, ValueError) as e:
+                self.fmt.error(str(e))
+                return
+            if duration is None:
+                self.fmt.success(f"添加继承: {gname}")
             else:
-                self.mgr.group_inherit(holder.name, gname)
-            self.fmt.success(f"添加继承: {gname}")
-        elif sub == "remove":
+                self.fmt.success(
+                    f"添加临时继承: {gname}，有效期 {format_duration(duration)}"
+                )
+            return
+
+        if sub in ("remove", "removetemp"):
             if not sub_args:
-                self.fmt.error("用法: parent remove <group>")
+                self.fmt.error(f"用法: parent {sub} <group>")
                 return
             gname = sub_args[0]
-            if isinstance(holder, User):
-                self.mgr.user_remove_group(holder.unique_id, gname)
+            if sub == "removetemp":
+                try:
+                    reduce_seconds, ctx_args = self._parse_optional_duration(
+                        sub_args[1:]
+                    )
+                except DurationParseError as e:
+                    self.fmt.error(str(e))
+                    return
+                self._reduce_temp_node(
+                    holder,
+                    f"{GROUP_NODE_PREFIX}{gname}",
+                    self._parse_context(ctx_args),
+                    reduce_seconds,
+                )
+                return
+            if is_group:
+                self.mgr.group_remove_inherit(holder_id, gname)
             else:
-                self.mgr.group_remove_inherit(holder.name, gname)
+                self.mgr.user_remove_group(holder_id, gname)
             self.fmt.success(f"移除继承: {gname}")
-        else:
-            self.fmt.error(f"未知子命令: parent {sub}")
+            return
+
+        if sub == "set":
+            if not sub_args:
+                self.fmt.error("用法: parent set <group>")
+                return
+            gname = sub_args[0]
+            self.mgr.clear_parents(holder_id, is_group, keep_default=False)
+            if is_group:
+                self.mgr.group_inherit(holder_id, gname)
+            else:
+                self.mgr.user_add_group(holder_id, gname)
+            self.fmt.success(f"已设置父组: {gname}")
+            return
+
+        if sub == "clear":
+            removed = self.mgr.clear_parents(holder_id, is_group)
+            self.fmt.success(f"已清空父组（{removed} 个）")
+            return
+
+        if sub == "cleartrack":
+            if not sub_args:
+                self.fmt.error("用法: parent cleartrack <track>")
+                return
+            track = self.mgr.get_track(sub_args[0])
+            if not track:
+                self.fmt.error(f"轨道不存在: {sub_args[0]}")
+                return
+            for gname in track.groups:
+                if is_group:
+                    self.mgr.group_remove_inherit(holder_id, gname)
+                else:
+                    self.mgr.user_remove_group(holder_id, gname)
+            self.fmt.success(f"已清除轨道 {track.name} 上的父组")
+            return
+
+        if sub == "settrack":
+            if len(sub_args) < 2:
+                self.fmt.error("用法: parent settrack <track> <index|group>")
+                return
+            track = self.mgr.get_track(sub_args[0])
+            if not track:
+                self.fmt.error(f"轨道不存在: {sub_args[0]}")
+                return
+            target = sub_args[1]
+            groups = track.groups
+            if target.isdigit():
+                position = int(target)
+                if position < 1 or position > len(groups):
+                    self.fmt.error(f"轨道位置超出范围: {target}")
+                    return
+                gname = groups[position - 1]
+            elif target in groups:
+                gname = target
+            else:
+                self.fmt.error(f"组不在轨道中: {target}")
+                return
+            # 先清掉轨道上的旧组，再设置目标组
+            for old in groups:
+                if is_group:
+                    self.mgr.group_remove_inherit(holder_id, old)
+                else:
+                    self.mgr.user_remove_group(holder_id, old)
+            if is_group:
+                self.mgr.group_inherit(holder_id, gname)
+            else:
+                self.mgr.user_add_group(holder_id, gname)
+            self.fmt.success(f"已设置轨道 {track.name} 位置: {gname}")
+            return
+
+        self.fmt.error(f"未知子命令: parent {sub}")
 
     @staticmethod
     def _parse_context(args: list[str]) -> dict[str, str]:
@@ -936,6 +1281,287 @@ class LPCommand:
             if a == flag and i + 1 < len(args):
                 return args[i + 1]
         return None
+
+    def _parse_temp_options(
+        self, args: list[str], require_duration: bool
+    ) -> tuple[Optional[int], str, list[str]]:
+        """解析 ``[duration] [--modifier M] [ctx...]``。
+
+        Args:
+            args: 待解析参数。
+            require_duration: 为 True 时第一个位置参数视作 duration
+                （``addtemp`` / ``settemp`` 语法）。
+
+        Return:
+            (duration, modifier, context_args)
+
+        Raises:
+            DurationParseError: duration 非法。
+        """
+        duration: Optional[int] = None
+        modifier = DEFAULT_TEMP_MODIFIER
+        ctx_args: list[str] = []
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a == "--duration" and i + 1 < len(args):
+                duration = parse_duration(args[i + 1])
+                i += 1
+            elif a == "--modifier" and i + 1 < len(args):
+                modifier = args[i + 1].lower()
+                i += 1
+            elif a.startswith("--") and a[2:].lower() in TEMP_MODIFIERS:
+                modifier = a[2:].lower()
+            elif (
+                require_duration
+                and duration is None
+                and "=" not in a
+                and not a.startswith("--")
+            ):
+                duration = parse_duration(a)
+            else:
+                ctx_args.append(a)
+            i += 1
+        return duration, modifier, ctx_args
+
+    def _parse_node_options(
+        self, args: list[str], require_duration: bool
+    ) -> tuple[bool, Optional[int], str, list[str]]:
+        """解析 ``[true|false] [duration] [--modifier M] [ctx...]``。
+
+        Return:
+            (value, duration, modifier, context_args)
+        """
+        value = True
+        rest: list[str] = []
+        for a in args:
+            low = a.lower()
+            if low in ("true", "t", "1"):
+                value = True
+            elif low in ("false", "f", "0"):
+                value = False
+            else:
+                rest.append(a)
+        duration, modifier, ctx_args = self._parse_temp_options(rest, require_duration)
+        return value, duration, modifier, ctx_args
+
+    @staticmethod
+    def _parse_optional_duration(
+        args: list[str],
+    ) -> tuple[Optional[int], list[str]]:
+        """解析可选的前置 duration 与上下文参数（``unsettemp`` 语法）。"""
+        duration: Optional[int] = None
+        ctx_args: list[str] = []
+        for a in args:
+            if duration is None and "=" not in a and not a.startswith("--"):
+                duration = parse_duration(a)
+            else:
+                ctx_args.append(a)
+        return duration, ctx_args
+
+    def _reduce_temp_node(
+        self,
+        holder: Any,
+        node_key: str,
+        ctx: dict[str, str],
+        reduce_seconds: Optional[int],
+    ) -> None:
+        """移除或缩短临时节点（``unsettemp`` 语义）。"""
+        node = holder.get_node(node_key, ctx)
+        if node is None or node.expiry is None:
+            self.fmt.error(f"不存在临时权限: {node_key}")
+            return
+        if reduce_seconds is None:
+            holder.remove_node(node_key, ctx)
+            self.mgr.save_all()
+            self.fmt.success(f"已移除临时权限: {node_key}")
+            return
+        new_expiry = node.expiry - reduce_seconds
+        if new_expiry <= time.time():
+            holder.remove_node(node_key, ctx)
+            self.mgr.save_all()
+            self.fmt.success(f"临时权限已耗尽并移除: {node_key}")
+        else:
+            holder.add_node(Node(node.key, node.value, node.context, new_expiry))
+            self.mgr.save_all()
+            self.fmt.success(
+                f"临时权限剩余 {format_duration(new_expiry - time.time())}: {node_key}"
+            )
+
+    def _print_parents(self, holder: Any) -> None:
+        self.fmt.print(f"Parents: {holder.parents}")
+        temps = holder.temp_parents
+        if temps:
+            self.fmt.print(f"Temporary Parents: {temps}")
+
+    def _print_meta(self, holder: Any) -> None:
+        for meta_type in ("prefix", "suffix", "displayname", "weight"):
+            value = holder.get_meta(meta_type)
+            self.fmt.print(f"  {meta_type}: {value if value is not None else '-'}")
+        custom: list[str] = []
+        for node in holder.nodes:
+            if node.key.startswith(CUSTOM_META_PREFIX):
+                parts = node.key.split(".", 2)
+                if len(parts) == 3:
+                    custom.append(f"{parts[1]}={parts[2]}")
+        if custom:
+            self.fmt.print(f"  custom: {', '.join(custom)}")
+
+    def _report_meta(self, node_key: str, duration: Optional[int]) -> None:
+        if duration is None:
+            self.fmt.success(f"已设置 meta: {node_key}")
+        else:
+            self.fmt.success(
+                f"已设置临时 meta: {node_key}，有效期 {format_duration(duration)}"
+            )
+
+    def _cmd_meta(self, holder: Any, args: list[str]) -> None:
+        is_group = isinstance(holder, Group)
+        holder_id = holder.name if is_group else holder.unique_id
+
+        if not args:
+            self._print_meta(holder)
+            return
+        sub = args[0]
+        sub_args = args[1:]
+
+        if sub == "info":
+            self._print_meta(holder)
+            return
+
+        if sub == "set":
+            if len(sub_args) < 2:
+                self.fmt.error("用法: meta set <key> <value> [duration] [ctx...]")
+                return
+            key, value = sub_args[0], sub_args[1]
+            try:
+                duration, modifier, ctx_args = self._parse_temp_options(
+                    sub_args[2:], require_duration=True
+                )
+            except DurationParseError as e:
+                self.fmt.error(str(e))
+                return
+            node_key = self.mgr.set_meta(
+                holder_id,
+                key,
+                value,
+                is_group=is_group,
+                context=self._parse_context(ctx_args),
+                duration=duration,
+                modifier=modifier,
+            )
+            self._report_meta(node_key, duration)
+            return
+
+        if sub == "unset":
+            if not sub_args:
+                self.fmt.error("用法: meta unset <key> [ctx...]")
+                return
+            removed = self.mgr.unset_meta(
+                holder_id,
+                sub_args[0],
+                is_group=is_group,
+                context=self._parse_context(sub_args[1:]),
+            )
+            if removed:
+                self.fmt.success(f"已移除 meta: {sub_args[0]}")
+            else:
+                self.fmt.error(f"meta 不存在: {sub_args[0]}")
+            return
+
+        if sub in ("addprefix", "addsuffix"):
+            meta_type = "prefix" if sub == "addprefix" else "suffix"
+            if len(sub_args) < 2 or not sub_args[0].isdigit():
+                self.fmt.error(f"用法: meta {sub} <priority> <value> [--duration D]")
+                return
+            priority = int(sub_args[0])
+            value = sub_args[1]
+            try:
+                duration, modifier, ctx_args = self._parse_temp_options(
+                    sub_args[2:], require_duration=False
+                )
+            except DurationParseError as e:
+                self.fmt.error(str(e))
+                return
+            node_key = self.mgr.set_meta(
+                holder_id,
+                meta_type,
+                value,
+                priority=priority,
+                is_group=is_group,
+                context=self._parse_context(ctx_args),
+                duration=duration,
+                modifier=modifier,
+            )
+            self._report_meta(node_key, duration)
+            return
+
+        if sub in ("setprefix", "setsuffix"):
+            meta_type = "prefix" if sub == "setprefix" else "suffix"
+            if not sub_args:
+                self.fmt.error(f"用法: meta {sub} [priority] <value> [--duration D]")
+                return
+            if sub_args[0].isdigit() and len(sub_args) > 1:
+                priority = int(sub_args[0])
+                value = sub_args[1]
+                rest = sub_args[2:]
+            else:
+                priority = 0
+                value = sub_args[0]
+                rest = sub_args[1:]
+            try:
+                duration, modifier, ctx_args = self._parse_temp_options(
+                    rest, require_duration=False
+                )
+            except DurationParseError as e:
+                self.fmt.error(str(e))
+                return
+            # set 语义：先清掉同类型旧节点
+            self.mgr.unset_meta(holder_id, meta_type, is_group=is_group)
+            node_key = self.mgr.set_meta(
+                holder_id,
+                meta_type,
+                value,
+                priority=priority,
+                is_group=is_group,
+                context=self._parse_context(ctx_args),
+                duration=duration,
+                modifier=modifier,
+            )
+            self._report_meta(node_key, duration)
+            return
+
+        if sub in ("removeprefix", "removesuffix"):
+            meta_type = "prefix" if sub == "removeprefix" else "suffix"
+            if not sub_args or not sub_args[0].isdigit():
+                self.fmt.error(f"用法: meta {sub} <priority> [value]")
+                return
+            removed = self.mgr.unset_meta(
+                holder_id,
+                meta_type,
+                priority=int(sub_args[0]),
+                value=sub_args[1] if len(sub_args) > 1 else None,
+                is_group=is_group,
+            )
+            if removed:
+                self.fmt.success(f"已移除 {meta_type}（{removed} 个）")
+            else:
+                self.fmt.error(f"{meta_type} 不存在")
+            return
+
+        if sub == "clear":
+            keep = [
+                n
+                for n in holder.nodes
+                if not n.is_meta and not n.key.startswith(CUSTOM_META_PREFIX)
+            ]
+            removed = len(holder.nodes) - len(keep)
+            holder.set_nodes(keep)
+            self.mgr.save_all()
+            self.fmt.success(f"已清空 meta 节点（{removed} 个）")
+            return
+
+        self.fmt.error(f"未知子命令: meta {sub}")
 
 
 # ------------------------------------------------------------------

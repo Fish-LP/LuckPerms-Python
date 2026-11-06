@@ -1,9 +1,8 @@
 """
 LuckPermsAPI 查询引擎单元测试。
 """
-import time
 
-import pytest
+import time
 
 from luckperms.models import Group, Node, User
 from luckperms.query import PermissionQuery
@@ -114,8 +113,15 @@ class TestPermissionQuery:
         u.add_node(Node("plugin.admin", True, {"server": "s1", "world": "w1"}))
         self.users["1"] = u
 
-        assert self.q.check("1", "plugin.admin", {"server": "s1", "world": "w1"}) is True
-        assert self.q.check("1", "plugin.admin", {"server": "s1", "world": "w1", "extra": "x"}) is True
+        assert (
+            self.q.check("1", "plugin.admin", {"server": "s1", "world": "w1"}) is True
+        )
+        assert (
+            self.q.check(
+                "1", "plugin.admin", {"server": "s1", "world": "w1", "extra": "x"}
+            )
+            is True
+        )
         assert self.q.check("1", "plugin.admin", {"server": "s1"}) is False
 
     def test_dynamic_group_inheritance_with_context(self):
@@ -307,7 +313,7 @@ class TestPermissionQuery:
         self.groups["high"] = high
 
         mid = Group("mid", weight=50)
-        mid.add_parent("low")   # 近亲，但 low weight
+        mid.add_parent("low")  # 近亲，但 low weight
         mid.add_parent("high")  # 远亲，但 high weight
         self.groups["mid"] = mid
 

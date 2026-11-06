@@ -4,6 +4,7 @@ LuckPerms 原版配置项兼容。
 参考原版 LuckPerms config.yml 中的关键配置项，
 作为 PermissionQuery 的行为开关。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

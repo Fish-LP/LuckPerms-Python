@@ -3,6 +3,7 @@ LuckPermsAPI 核心权限模型。
 
 参考 LuckPerms 设计，实现 Node / PermissionHolder / User / Group / Track。
 """
+
 from __future__ import annotations
 
 import time
@@ -10,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from .constants import (
+    CUSTOM_META_PREFIX,
     DEFAULT_GROUP_NAME,
     GROUP_NODE_PREFIX,
     META_PREFIXES,
@@ -27,6 +29,7 @@ class Node:
         context: 上下文集合，如 ``{"group_id": "123456"}``。
         expiry: 过期时间戳（秒），None 表示永不过期。
     """
+
     key: str
     value: bool = True
     context: Dict[str, List[str]] = field(default_factory=dict)
@@ -70,7 +73,9 @@ class Node:
         return self.key.startswith(META_PREFIXES)
 
     @property
-    def meta_type(self) -> Optional[Literal["prefix", "suffix", "displayname", "weight"]]:
+    def meta_type(
+        self,
+    ) -> Optional[Literal["prefix", "suffix", "displayname", "weight"]]:
         """返回元数据类型，非元数据节点返回 None。"""
         for prefix in META_PREFIXES:
             if self.key.startswith(prefix):
@@ -151,7 +156,13 @@ class Node:
         )
 
     def __hash__(self) -> int:
-        return hash((self.key, self.value, tuple(sorted((k, tuple(v)) for k, v in self.context.items()))))
+        return hash(
+            (
+                self.key,
+                self.value,
+                tuple(sorted((k, tuple(v)) for k, v in self.context.items())),
+            )
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Node):
@@ -199,6 +210,24 @@ class PermissionHolder:
                 return True
         return False
 
+    def get_node(
+        self, key: str, context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Node]:
+        """按 key + context 查找节点。
+
+        Args:
+            key: 节点 key。
+            context: 上下文（须完全一致才算匹配）。
+
+        Return:
+            匹配的节点，未找到返回 None。
+        """
+        ctx = Node.normalize_context(context or {})
+        for node in self._nodes:
+            if node.key == key and node.context == ctx:
+                return node
+        return None
+
     def clear_nodes(self) -> None:
         """清空所有节点。"""
         self._nodes.clear()
@@ -213,6 +242,39 @@ class PermissionHolder:
         if group_name in self._parents:
             self._parents.remove(group_name)
 
+    def clear_parents(self) -> None:
+        """清空所有父组继承（不含临时继承节点）。"""
+        self._parents.clear()
+
+    def add_temp_parent(
+        self, group_name: str, expiry: float, context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """添加临时父组。
+
+        以带过期时间的 ``group.<name>`` 节点表示，查询引擎会自动将其视为动态父组。
+
+        Args:
+            group_name: 组名。
+            expiry: 过期时间戳（秒）。
+            context: 上下文约束。
+        """
+        self.add_node(
+            Node(f"{GROUP_NODE_PREFIX}{group_name}", True, context or {}, expiry)
+        )
+
+    def remove_temp_parent(self, group_name: str) -> bool:
+        """移除临时父组节点。Return: 是否移除成功。"""
+        return self.remove_node(f"{GROUP_NODE_PREFIX}{group_name}")
+
+    @property
+    def temp_parents(self) -> List[str]:
+        """临时父组对应的组名列表。"""
+        names: List[str] = []
+        for node in self._nodes:
+            if node.key.startswith(GROUP_NODE_PREFIX):
+                names.append(node.key[len(GROUP_NODE_PREFIX) :])
+        return names
+
     def set_transient_context(self, key: str, value: str) -> None:
         """设置瞬态上下文（运行时有效，不持久化）。"""
         self.transient_contexts[key] = value
@@ -224,17 +286,26 @@ class PermissionHolder:
     def get_meta(self, meta_type: str) -> Optional[str]:
         """提取指定类型的最高优先级 meta 值。
 
+        支持 ``prefix`` / ``suffix`` / ``displayname`` / ``weight``，
+        以及自定义 ``meta.<key>.<value>`` 节点。
+
         例如 ``get_meta("prefix")`` 返回优先级最高的 prefix 值。
         """
         candidates: List[Tuple[int, str]] = []
         for node in self._nodes:
-            if node.meta_type == meta_type and node.value is True:
+            if node.value is not True:
+                continue
+            if node.meta_type == meta_type:
                 parts = node.key.split(".")
                 try:
                     priority = int(parts[1]) if len(parts) > 1 else 0
                 except ValueError:
                     priority = 0
                 candidates.append((priority, node.meta_value or ""))
+            elif node.key.startswith(CUSTOM_META_PREFIX):
+                parts = node.key.split(".", 2)
+                if len(parts) == 3 and parts[1] == meta_type:
+                    candidates.append((0, parts[2]))
         if not candidates:
             return None
         return max(candidates, key=lambda x: x[0])[1]
@@ -289,7 +360,7 @@ class User(PermissionHolder):
     @property
     def is_default(self) -> bool:
         """Return: 是否为默认状态用户（无需持久化）。
-        
+
         默认状态判定：
         - 无自定义权限节点
         - 无瞬态上下文
@@ -316,13 +387,19 @@ class User(PermissionHolder):
         display = d.get("display_name") or d.get("displayName", "")
         u = cls(d["id"], display)
         u._nodes = [Node.from_dict(n) for n in d.get("nodes", [])]
-        
+
         # FIX: Web Editor 用 group.xxx 节点表示继承，反向同步到 _parents
+        # 带过期时间的节点属于临时继承，不固化到 _parents
         parents = d.get("parents", [])
         u._parents = list(parents)
         for node in u._nodes:
-            if node.key.startswith(GROUP_NODE_PREFIX) and node.value and not node.context:
-                gname = node.key[len(GROUP_NODE_PREFIX):]
+            if (
+                node.key.startswith(GROUP_NODE_PREFIX)
+                and node.value
+                and not node.context
+                and node.expiry is None
+            ):
+                gname = node.key[len(GROUP_NODE_PREFIX) :]
                 if gname not in u._parents:
                     u._parents.append(gname)
         return u
@@ -374,13 +451,18 @@ class Group(PermissionHolder):
         display = d.get("display_name") or d.get("displayName", "")
         g = cls(d["id"], display, d.get("weight", 0))
         g._nodes = [Node.from_dict(n) for n in d.get("nodes", [])]
-        
-        # FIX: 同 User，从 nodes 反向同步 parents
+
+        # FIX: 同 User，从 nodes 反向同步 parents（临时继承不固化）
         parents = d.get("parents", [])
         g._parents = list(parents)
         for node in g._nodes:
-            if node.key.startswith(GROUP_NODE_PREFIX) and node.value and not node.context:
-                gname = node.key[len(GROUP_NODE_PREFIX):]
+            if (
+                node.key.startswith(GROUP_NODE_PREFIX)
+                and node.value
+                and not node.context
+                and node.expiry is None
+            ):
+                gname = node.key[len(GROUP_NODE_PREFIX) :]
                 if gname not in g._parents:
                     g._parents.append(gname)
         return g

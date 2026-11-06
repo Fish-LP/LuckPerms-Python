@@ -1,6 +1,7 @@
 """
 LuckPermsAPI 管理器单元测试。
 """
+
 import os
 import tempfile
 import time
@@ -8,7 +9,7 @@ import time
 import pytest
 
 from luckperms.manager import LuckPermsManager
-from luckperms.models import Group, Node, User
+from luckperms.models import User
 from luckperms.storage import JSONBackend
 
 
@@ -293,7 +294,9 @@ class TestManager:
         self.mgr.create_user("1")
         self.mgr.user_add_node("1", "temp", True, duration=3600)
         payload = self.mgr.to_webeditor_payload()
-        user_holder = [h for h in payload["permissionHolders"] if h["type"] == "user"][0]
+        user_holder = [h for h in payload["permissionHolders"] if h["type"] == "user"][
+            0
+        ]
         node_data = user_holder["nodes"][0]
         assert "expiry" in node_data
         assert isinstance(node_data["expiry"], int)
@@ -311,7 +314,9 @@ class TestManager:
         """WebEditor 中的 group weight 往返正确。"""
         self.mgr.create_group("admin", weight=100)
         payload = self.mgr.to_webeditor_payload()
-        group_holder = [h for h in payload["permissionHolders"] if h["type"] == "group"][0]
+        group_holder = [
+            h for h in payload["permissionHolders"] if h["type"] == "group"
+        ][0]
         assert group_holder["weight"] == 100
 
         mgr2 = LuckPermsManager(tempfile.mkdtemp())
@@ -379,6 +384,7 @@ class TestManager:
         assert len(self.mgr.get_user("u1").nodes) == 1
 
         import time
+
         time.sleep(1.1)
         self.mgr.save_all()
 
@@ -391,11 +397,13 @@ class TestManager:
         self.mgr.user_add_node("u1", "expired", True, duration=1)
 
         import time
+
         time.sleep(1.1)
 
         payload = self.mgr.to_webeditor_payload()
-        user_holder = [h for h in payload["permissionHolders"] if h["type"] == "user"][0]
+        user_holder = [h for h in payload["permissionHolders"] if h["type"] == "user"][
+            0
+        ]
         keys = [n["key"] for n in user_holder["nodes"]]
         assert "active" in keys
         assert "expired" not in keys
-

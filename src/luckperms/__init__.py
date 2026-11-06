@@ -21,6 +21,8 @@ LuckPermsAPI —— Python 实现的 LuckPerms 风格权限系统。
 
     assert mgr.check("123456", "plugin.chat") is True
 """
+
+from .duration import DurationParseError, format_duration, parse_duration
 from .manager import LuckPermsManager
 from .models import Group, Node, PermissionHolder, Track, User
 from .query import PermissionQuery
@@ -43,4 +45,7 @@ __all__ = [
     "BytebinClient",
     "BytesocksClient",
     "WebEditorSession",
+    "DurationParseError",
+    "format_duration",
+    "parse_duration",
 ]

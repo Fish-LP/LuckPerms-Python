@@ -3,12 +3,13 @@ LuckPerms Bytebin API 客户端（官方协议兼容版）。
 
 User-Agent 使用官方格式 ``LuckPerms/<plugin-version>/editor``。
 """
+
 from __future__ import annotations
 
 import gzip
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import aiohttp
 
@@ -58,9 +59,7 @@ class BytebinClient:
             ) as resp:
                 if resp.status not in (200, 201):
                     text = await resp.text()
-                    raise RuntimeError(
-                        f"Bytebin 上传失败: HTTP {resp.status} - {text}"
-                    )
+                    raise RuntimeError(f"Bytebin 上传失败: HTTP {resp.status} - {text}")
 
                 key: str | None = None
                 location = resp.headers.get("Location")
@@ -69,16 +68,10 @@ class BytebinClient:
 
                 if not key:
                     result = await resp.json()
-                    key = (
-                        result.get("key")
-                        or result.get("code")
-                        or result.get("id")
-                    )
+                    key = result.get("key") or result.get("code") or result.get("id")
 
                 if not key:
-                    raise RuntimeError(
-                        f"Bytebin 返回无效响应: {await resp.text()}"
-                    )
+                    raise RuntimeError(f"Bytebin 返回无效响应: {await resp.text()}")
                 log.info("Bytebin 上传成功, key=%s", key)
                 return key
 
@@ -101,9 +94,7 @@ class BytebinClient:
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()
-                    raise RuntimeError(
-                        f"Bytebin 下载失败: HTTP {resp.status} - {text}"
-                    )
+                    raise RuntimeError(f"Bytebin 下载失败: HTTP {resp.status} - {text}")
                 raw = await resp.read()
                 try:
                     decompressed = gzip.decompress(raw)

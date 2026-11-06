@@ -60,7 +60,8 @@
 - `Node` 是原子权限单元，包含 `key`（支持 `*` 单段和 `**` 多段通配）、`value`（True/False）、`context`（键值对上下文）、`expiry`（过期时间戳）。
 - 元数据节点：`prefix.` / `suffix.` / `displayname.` / `weight.` 开头的 key 会被识别为 meta 节点，`Node.is_meta` / `meta_type` / `meta_value` 提供解析支持。
 - `PermissionHolder` 是 `User` 和 `Group` 的抽象基类，管理 `_nodes` 列表和 `_parents` 继承链，支持 `transient_contexts`（瞬态上下文，运行时有效不持久化）。
-- `User` 通过 `unique_id` 标识，`Group` 通过 `name` 标识；两者均支持 `add_node` / `remove_node` / `add_parent` / `remove_parent`。
+- `User` 通过 `unique_id` 标识，`Group` 通过 `name` 标识；两者均支持 `add_node` / `remove_node` / `add_parent` / `remove_parent`，以及临时能力：`add_temp_parent` / `remove_temp_parent` / `get_node` / `clear_parents` / `temp_parents`。
+- 临时权限（有效期）：`Node.expiry` 为过期时间戳；`user_add_node` / `group_add_node` / `user_add_group` / `group_inherit` / `set_meta` 均接受 `duration`（相对秒数）与 `modifier`（`accumulate` / `replace` / `deny`）。时长字符串由 `luckperms.duration.parse_duration` 解析。
 - `Group.weight` 为 property，优先从 `weight.X` 元数据节点解析，兼容 Web Editor 格式；setter 自动同步节点。
 - `Track` 实现角色晋升路径（`promote` / `demote`），按 `groups` 列表顺序切换；晋升/降级时会清理用户在 track 中的所有旧组（原版行为）。
 - `LuckPermsManager` 自动加载 `users.{ext}` / `groups.{ext}` / `tracks.{ext}`，任何修改后调用 `save_all()` 持久化；保存时自动清理过期节点，Web Editor payload 中过滤过期节点。
@@ -95,6 +96,7 @@
 - `*` 只匹配单段（`plugin.*` 匹配 `plugin.chat`，不匹配 `plugin.a.b`）。
 - `**` 匹配任意多段（`plugin.**` 匹配 `plugin`、`plugin.chat`、`plugin.a.b.c`）。
 - 上下文匹配规则：节点的 context 必须是查询 context 的子集（节点要求的所有键值对都必须满足）。
+- 动态父组：`group.<name>` 节点（含临时继承）在查询时解析为父组，已过期节点（`is_expired()`）会被忽略。
 
 **对应文件/路径**：
 
@@ -172,19 +174,22 @@
 
 - CLI 参考 Minecraft LuckPerms 插件的 `/lp` 命令结构，核心子命令：
   - `lp user <id> info` — 查看用户详情（节点、继承组、上下文）。
-  - `lp user <id> permission set <node> [true/false] [context...]` — 设置/移除权限节点。
-  - `lp user <id> parent add/remove <group>` — 管理用户所属组。
+  - `lp user <id> permission set <node> [true/false] [context...] [--duration D]` — 设置权限节点。
+  - `lp user <id> permission settemp <node> <true/false> <duration> [--modifier accumulate|replace|deny]` — 设置临时权限。
+  - `lp user <id> permission unset / unsettemp [duration] / clear` — 移除权限 / 缩短临时权限 / 清空权限。
+  - `lp user <id> parent add / addtemp / remove / removetemp / set / clear / settrack / cleartrack` — 继承管理（含临时继承）。
+  - `lp user <id> meta info / set / unset / addprefix / addsuffix / setprefix / setsuffix / removeprefix / removesuffix / clear` — 元数据（可临时化）。
+  - `lp user <id> showtracks / clear` — 轨道位置 / 清空用户数据。
   - `lp user <id> promote/demote <track>` — 沿轨道晋升/降级。
-  - `lp group <name> info` — 查看组详情。
-  - `lp group <name> permission set <node> ...` — 设置组权限。
-  - `lp group <name> inherit <parent>` — 设置组继承关系。
-  - `lp track <name> info/append/insert/remove` — 轨道管理。
+  - `lp group <name> ...` — 同 user（另有 `setweight` / `setdisplayname` / `listmembers` / `clear`）。
+  - `lp track <name> info / append / insert <group> <position> / remove / clear / rename` — 轨道管理。
   - `lp editor` — 一键启动 Web Editor 会话并输出 URL。
   - `lp check <user> <node> [context...]` — 检查用户是否拥有某权限。
   - `lp sync` — 强制重新加载磁盘数据。
   - `lp info` — 显示系统统计信息。
+- 时长格式：`30m` / `12h` / `7d` / `1mo3d13h45m` / unix 时间戳（10 位以上纯数字）/ `permanent`，解析实现见 `luckperms/duration.py`。
 - **诊断命令**：
-  - `lp verbose <user> [--filter <pattern>]` — 实时拦截并打印该用户的权限检查调用，显示每次检查的节点、上下文、结果、来源（自身节点/继承组/通配符匹配）。通过 `VerbosePermissionQuery` 包装 `PermissionQuery` 实现拦截，支持 `--filter` glob 过滤和 `--output` 日志导出。
+  - `lp verbose <user>` / `lp verbose off` — 实时打印该用户的权限检查结果与上下文（通过 `LuckPermsManager.set_verbose` 回调实现）。节点来源溯源与 `--filter` / `--output` 尚未实现。
   - `lp tree <user|group> [--depth N]` — 以树形结构递归展示权限继承链，每层显示组名、权重、直接节点数。使用 BFS/DFS 遍历，支持 `--depth` 限制递归深度，避免循环继承导致无限输出。节点后标注 `[self]` 或 `[inherited from <group>]` 帮助溯源。
 - `lp shell` — 进入交互式 REPL，支持 Tab 补全和历史记录。
 - 命令解析使用 `argparse` 或 `click`，支持嵌套子命令。

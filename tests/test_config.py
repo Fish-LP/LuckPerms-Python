@@ -1,6 +1,7 @@
 """
 LuckPermsConfig 单元测试。
 """
+
 from luckperms.config import LuckPermsConfig
 from luckperms.query import PermissionQuery
 

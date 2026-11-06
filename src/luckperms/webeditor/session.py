@@ -8,9 +8,9 @@ LuckPerms Web Editor 会话管理器（官方协议兼容版）。
 4. 支持 hello / change-request / ping 完整生命周期
 5. change-request 自动回复 accepted -> 应用 -> applied + newSessionCode
 """
+
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Callable, Optional
 
@@ -37,9 +37,7 @@ class WebEditorSession:
     ):
         self.get_payload = get_payload
         self.apply_changes = apply_changes
-        self.bytebin = (
-            BytebinClient(bytebin_url) if bytebin_url else BytebinClient()
-        )
+        self.bytebin = BytebinClient(bytebin_url) if bytebin_url else BytebinClient()
         self.bytesocks_url = bytesocks_url
         self._socks: Optional[BytesocksClient] = None
         self._code: Optional[str] = None

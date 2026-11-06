@@ -23,14 +23,13 @@ LuckPerms-Python 功能演示脚本。
 """
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 import tempfile
 import time
 from pathlib import Path
 
-from luckperms import LuckPermsManager
+from luckperms import LuckPermsManager, format_duration, parse_duration
 
 
 def print_section(title: str) -> None:
@@ -76,8 +75,8 @@ def main() -> None:
     mgr.group_add_node("default", "plugin.spawn", True)
     mgr.group_add_node("vip", "plugin.fly", True)
     mgr.group_add_node("mod", "plugin.kick", True)
-    mgr.group_add_node("admin", "plugin.*", True)      # 通配符：允许所有 plugin 权限
-    mgr.group_add_node("admin", "plugin.ban", False)   # 显式拒绝覆盖通配符
+    mgr.group_add_node("admin", "plugin.*", True)  # 通配符：允许所有 plugin 权限
+    mgr.group_add_node("admin", "plugin.ban", False)  # 显式拒绝覆盖通配符
 
     # 构建继承链: admin <- mod <- vip <- default
     mgr.group_inherit("vip", "default")
@@ -129,16 +128,23 @@ def main() -> None:
     print_section("3. 通配符系统")
 
     # admin 组已有 plugin.* = True
-    print_result("admin 通配 plugin.anything", mgr.check("u_charlie", "plugin.anything"))
+    print_result(
+        "admin 通配 plugin.anything", mgr.check("u_charlie", "plugin.anything")
+    )
     print_result("admin 通配 plugin.admin", mgr.check("u_charlie", "plugin.admin"))
 
     # 显式拒绝覆盖通配符
-    print_result("admin 显式拒绝 plugin.ban", mgr.check("u_charlie", "plugin.ban") is False)
+    print_result(
+        "admin 显式拒绝 plugin.ban", mgr.check("u_charlie", "plugin.ban") is False
+    )
 
     # 测试 ** 多段通配符
     mgr.group_add_node("admin", "server.**.status", True)
     print_result("** 匹配 server.status", mgr.check("u_charlie", "server.status"))
-    print_result("** 匹配 server.world.nether.status", mgr.check("u_charlie", "server.world.nether.status"))
+    print_result(
+        "** 匹配 server.world.nether.status",
+        mgr.check("u_charlie", "server.world.nether.status"),
+    )
 
     # 测试 * 单段通配符（不匹配多级）
     mgr.group_add_node("mod", "cmd.*", True)
@@ -154,15 +160,28 @@ def main() -> None:
     mgr.user_add_node("u_bob", "plugin.fly", True, {"world": "nether"})
 
     print("  Bob 的 plugin.fly 权限绑定 world=nether")
-    print_result("Bob 在 nether 可以 fly", mgr.check("u_bob", "plugin.fly", {"world": "nether"}))
-    print_result("Bob 在 overworld 不能 fly", mgr.check("u_bob", "plugin.fly", {"world": "overworld"}) is False)
-    print_result("Bob 无上下文不能 fly (上下文不匹配)", mgr.check("u_bob", "plugin.fly") is False)
+    print_result(
+        "Bob 在 nether 可以 fly", mgr.check("u_bob", "plugin.fly", {"world": "nether"})
+    )
+    print_result(
+        "Bob 在 overworld 不能 fly",
+        mgr.check("u_bob", "plugin.fly", {"world": "overworld"}) is False,
+    )
+    print_result(
+        "Bob 无上下文不能 fly (上下文不匹配)", mgr.check("u_bob", "plugin.fly") is False
+    )
 
     # 多上下文：需要同时满足 server 和 world
     mgr.user_add_node("u_alice", "plugin.gm", True, {"server": "s1", "world": "w1"})
     print("  Alice 的 plugin.gm 需要 server=s1 + world=w1")
-    print_result("Alice 在 s1+w1 可以 gm", mgr.check("u_alice", "plugin.gm", {"server": "s1", "world": "w1"}))
-    print_result("Alice 在 s1+w2 不能 gm", mgr.check("u_alice", "plugin.gm", {"server": "s1", "world": "w2"}) is False)
+    print_result(
+        "Alice 在 s1+w1 可以 gm",
+        mgr.check("u_alice", "plugin.gm", {"server": "s1", "world": "w1"}),
+    )
+    print_result(
+        "Alice 在 s1+w2 不能 gm",
+        mgr.check("u_alice", "plugin.gm", {"server": "s1", "world": "w2"}) is False,
+    )
 
     # ================================================================
     # 5. 临时权限（过期时间）
@@ -176,6 +195,24 @@ def main() -> None:
     print("  等待 2.5 秒...")
     time.sleep(2.5)
     print_result("Alice 过期后检查 temp", mgr.check("u_alice", "plugin.temp") is False)
+
+    # 时长语法：30m / 12h / 7d / 1mo3d13h45m / unix 时间戳 / permanent
+    seconds = parse_duration("2h30m")
+    print(
+        f"  parse_duration('2h30m') = {seconds} 秒，可读化: {format_duration(seconds)}"
+    )
+    mgr.user_add_node("u_bob", "plugin.timedsyntax", True, duration=seconds)
+
+    # 临时继承：1 天后自动失效
+    mgr.user_add_group("u_bob", "mod", duration=parse_duration("1d"))
+    print_result("Bob 临时继承 mod（可 kick）", mgr.check("u_bob", "plugin.kick"))
+
+    mgr.user_remove_group("u_bob", "mod")
+    print_result("移除临时继承后失效", mgr.check("u_bob", "plugin.kick") is False)
+
+    # 临时修饰符：replace 保留最长有效期，accumulate 累加，deny 冲突报错
+    mgr.user_add_node("u_bob", "plugin.meta", True, duration=3600, modifier="replace")
+    print("  Bob 设置 plugin.meta，修饰符 replace（保留最长有效期）")
 
     # ================================================================
     # 6. 继承树可视化（CLI 风格文本输出）
@@ -202,7 +239,9 @@ def main() -> None:
             g = mgr.get_group(name)
             if not g:
                 continue
-            print(f"  {'  ' * level}└── {g.name} (weight={g.weight}, nodes={len(g.nodes)})")
+            print(
+                f"  {'  ' * level}└── {g.name} (weight={g.weight}, nodes={len(g.nodes)})"
+            )
             for n in g.nodes:
                 val = "T" if n.value else "F"
                 print(f"  {'  ' * (level + 1)}├── {n.key} = {val}")
@@ -230,7 +269,9 @@ def main() -> None:
     print(f"  promote -> {result} | 当前组: {mgr.get_user('u_newbie').parents}")
 
     result = mgr.promote("u_newbie", "staff")
-    print(f"  promote -> {result} (已到最高级) | 当前组: {mgr.get_user('u_newbie').parents}")
+    print(
+        f"  promote -> {result} (已到最高级) | 当前组: {mgr.get_user('u_newbie').parents}"
+    )
 
     result = mgr.demote("u_newbie", "staff")
     print(f"  demote -> {result} | 当前组: {mgr.get_user('u_newbie').parents}")
@@ -239,7 +280,9 @@ def main() -> None:
     print(f"  demote -> {result} | 当前组: {mgr.get_user('u_newbie').parents}")
 
     result = mgr.demote("u_newbie", "staff")
-    print(f"  demote -> {result} (已移除所有轨道组) | 当前组: {mgr.get_user('u_newbie').parents}")
+    print(
+        f"  demote -> {result} (已移除所有轨道组) | 当前组: {mgr.get_user('u_newbie').parents}"
+    )
 
     # ================================================================
     # 8. Web Editor 序列化兼容
@@ -251,7 +294,7 @@ def main() -> None:
     holders = payload["permissionHolders"]
     tracks = payload["tracks"]
 
-    print(f"  元数据:")
+    print("  元数据:")
     print(f"    pluginVersion: {meta['pluginVersion']}")
     print(f"    platform: {meta['platform']}")
     print(f"    commandAlias: {meta['commandAlias']}")
@@ -268,8 +311,12 @@ def main() -> None:
     mgr2.apply_webeditor_changes(payload)
 
     print_result("Charlie 往返后仍可 chat", mgr2.check("u_charlie", "plugin.chat"))
-    print_result("Charlie 往返后仍拒绝 ban", mgr2.check("u_charlie", "plugin.ban") is False)
-    print_result("Newbie 往返后保留 default", mgr2.get_user("u_newbie").parents == ["default"])
+    print_result(
+        "Charlie 往返后仍拒绝 ban", mgr2.check("u_charlie", "plugin.ban") is False
+    )
+    print_result(
+        "Newbie 往返后保留 default", mgr2.get_user("u_newbie").parents == ["default"]
+    )
 
     # ================================================================
     # 9. 持久化验证
@@ -286,7 +333,10 @@ def main() -> None:
     mgr3 = LuckPermsManager(data_dir)
     print("  新实例加载数据完成")
     print_result("Alice 加载后仍可 chat", mgr3.check("u_alice", "plugin.chat"))
-    print_result("Bob 加载后仍受上下文限制", mgr3.check("u_bob", "plugin.fly", {"world": "nether"}))
+    print_result(
+        "Bob 加载后仍受上下文限制",
+        mgr3.check("u_bob", "plugin.fly", {"world": "nether"}),
+    )
 
     # ================================================================
     # 清理

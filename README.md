@@ -14,6 +14,7 @@ Python 实现的 [LuckPerms](https://luckperms.net/) 风格权限管理系统，
 - **通配符系统** — `*` 单段匹配，`**` 多段匹配，优先级与原版一致
 - **原版兼容 Weight 排序** — 继承优先级按组 Weight 从高到低排序，同 Weight 按继承深度排序
 - **元数据节点** — `prefix` / `suffix` / `displayname` / `weight` 作为权限节点，与原版 Web Editor 格式兼容
+- **临时权限（有效期）** — 支持 `1mo3d13h45m` 等时长语法与 unix 时间戳，`accumulate` / `replace` / `deny` 修饰符，继承与 meta 同样可临时化
 - **过期节点自动清理** — 保存时自动清理过期节点，Web Editor 中过滤过期数据
 - **Web Editor 集成** — 一键打开浏览器编辑器，实时同步变更
 - **交互式 CLI** — 内置 `lp` 命令行工具，支持 Tab 补全、继承树可视化、权限监听
@@ -76,6 +77,10 @@ assert mgr.check("123456", "plugin.fly", {"world": "overworld"}) is False
 
 # 临时权限：2 秒后自动过期
 mgr.user_add_node("123456", "plugin.temp", True, duration=2)
+
+# 时长支持 30m / 12h / 7d / 1mo3d13h45m / unix 时间戳 / permanent
+mgr.user_add_group("123456", "vip", duration=86400)          # 临时加入 vip 1 天
+mgr.user_add_node("123456", "plugin.x", True, duration=3600, modifier="replace")
 ```
 
 ### 继承链与 Track 晋升
@@ -124,7 +129,11 @@ lp check alice plugin.chat
 | ------------------------------------------------ | --------------- |
 | `user <id> info`                                 | 查看用户详情    |
 | `user <id> permission set <node> [T/F] [ctx...]` | 设置权限        |
+| `user <id> permission settemp <node> <T/F> <时长>` | 设置临时权限   |
 | `user <id> parent add <group>`                   | 加入组          |
+| `user <id> parent addtemp <group> <时长>`         | 临时加入组      |
+| `user <id> meta set <key> <value>`               | 设置元数据      |
+| `user <id> clear`                                | 清空用户数据    |
 | `user <id> promote <track>`                      | 沿轨道晋升      |
 | `group <name> info`                              | 查看组详情      |
 | `group <name> setweight <n>`                     | 设置权重        |
@@ -216,6 +225,7 @@ pre-commit run --all-files
 - ✅ 元数据节点（prefix / suffix / weight）
 - ✅ 瞬态上下文（Transient Contexts）
 - ✅ Track 晋升/降级边界行为
+- ✅ 临时权限与时长解析（`1d2h` / unix 时间戳 / `permanent`）
 - ✅ Web Editor 增量/全量变更协议
 - ✅ 过期节点自动清理
 

@@ -1,15 +1,15 @@
 """
 LuckPermsAPI Web Editor 单元测试。
 """
+
 import asyncio
 import json
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from luckperms.webeditor import BytebinClient, BytesocksClient, WebEditorSession
 from luckperms.manager import LuckPermsManager
+from luckperms.webeditor import BytebinClient, BytesocksClient, WebEditorSession
 
 
 class TestBytebinClient:
@@ -46,8 +46,10 @@ class TestBytesocksClient:
         client = BytesocksClient()
         client.channel = "test-ch"
         sent_messages = []
+
         async def mock_send(data):
             sent_messages.append(data)
+
         client._send = mock_send
 
         loop = asyncio.new_event_loop()
@@ -61,7 +63,6 @@ class TestBytesocksClient:
 
         assert len(sent_messages) == 1
         assert sent_messages[0]["type"] == "pong"
-
 
     def test_apply_callback(self):
         """验证收到 change-request 消息会触发 on_change_request 回调。"""
@@ -137,13 +138,12 @@ class TestWebEditorSession:
             await session.close()
             mock_socks.stop.assert_awaited_once()
 
-
     def test_on_apply_calls_callback(self):
         get_payload = MagicMock(return_value={})
         apply_changes = MagicMock()
         session = WebEditorSession(get_payload, apply_changes)
         session._closed = False
-        
+
         # FIX: mock bytebin 和 _socks，避免真发网络请求
         session.bytebin = MagicMock()
         session.bytebin.download = AsyncMock(return_value={"changes": []})
@@ -156,7 +156,6 @@ class TestWebEditorSession:
         finally:
             loop.close()
         apply_changes.assert_called_once()
-
 
     def test_on_apply_ignored_when_closed(self):
         get_payload = MagicMock(return_value={})
@@ -172,11 +171,10 @@ class TestWebEditorSession:
         apply_changes.assert_not_called()
 
 
-
 class TestWebEditorPayload:
     def test_node_expiry_conversion(self):
         """验证节点过期时间在序列化时保持为秒（官方协议）。"""
-        mgr = LuckPermsManager.__new__(LuckPermsManager)
+        LuckPermsManager.__new__(LuckPermsManager)
         node = MagicMock()
         node.key = "test"
         node.value = True
@@ -186,22 +184,25 @@ class TestWebEditorPayload:
         # FIX: 官方使用秒，不再 *1000
         assert result["expiry"] == 1234
 
-
     def test_node_expiry_deserialization(self):
         """验证秒级过期时间直接反序列化，无需转换。"""
-        node = LuckPermsManager._node_from_webeditor({
-            "key": "test",
-            "value": True,
-            "expiry": 1234.5,
-        })
+        node = LuckPermsManager._node_from_webeditor(
+            {
+                "key": "test",
+                "value": True,
+                "expiry": 1234.5,
+            }
+        )
         # FIX: 直接保留秒值，不再 /1000
         assert node.expiry == 1234.5
 
     def test_node_no_expiry_roundtrip(self):
         """验证无过期时间节点往返正确。"""
-        node = LuckPermsManager._node_from_webeditor({
-            "key": "test",
-            "value": False,
-        })
+        node = LuckPermsManager._node_from_webeditor(
+            {
+                "key": "test",
+                "value": False,
+            }
+        )
         assert node.expiry is None
         assert node.value is False
